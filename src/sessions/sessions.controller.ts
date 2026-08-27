@@ -1,7 +1,9 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -65,5 +67,15 @@ export class SessionsController {
     @Body() dto: SetLogPatchDto,
   ): Promise<SetLogDto> {
     return this.sessions.patchSetLog(user, id, dto);
+  }
+
+  /** EXTENSIÓN: el contrato no lo tiene, pero sin esto no se puede borrar. */
+  @Delete('set-logs/:id')
+  @HttpCode(204)
+  removeSetLog(
+    @CurrentUser() user: UserDto,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<void> {
+    return this.sessions.removeSetLog(user, id);
   }
 }
