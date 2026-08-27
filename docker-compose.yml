@@ -1,0 +1,33 @@
+# Base de datos de desarrollo.
+#
+# El contenedor `fitback-postgres` ya existe y corre con restart:unless-stopped,
+# así que normalmente no hace falta levantar nada. Este archivo está para poder
+# recrearlo si alguna vez se borra: apunta al MISMO volumen, así no se pierden
+# los datos.
+#
+# Puerto 5433 en el host: el 5432 lo ocupa el postgres de agendapp.
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: fitback-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: fitback
+      POSTGRES_USER: fitback
+      POSTGRES_PASSWORD: fitback
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fitback -d fitback"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  # Volumen preexistente, creado por el proyecto `fitback` original.
+  pgdata:
+    external: true
+    name: fitback_fitback_pgdata

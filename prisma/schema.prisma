@@ -1,0 +1,151 @@
+// Esquema recuperado por introspección de la base `fitback` (el backend
+// anterior, cuya carpeta se borró). Los `@default(uuid())`, `@updatedAt` y los
+// nombres de relación se reescribieron a mano: son atributos que solo viven en
+// Prisma y la introspección no puede recuperarlos desde el SQL.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  trainer
+  client
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  name      String
+  role      UserRole @default(client)
+  createdAt DateTime @default(now())
+
+  // Cartera: un cliente pertenece a un entrenador.
+  trainerId String?
+  trainer   User?   @relation("TrainerClients", fields: [trainerId], references: [id])
+  clients   User[]  @relation("TrainerClients")
+
+  ownedSplits          Split[]
+  assignmentsAsClient  SplitAssignment[] @relation("AssignmentClient")
+  assignmentsAsTrainer SplitAssignment[] @relation("AssignmentTrainer")
+  sessions             WorkoutSession[]
+}
+
+model Split {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Autor de la rutina (el entrenador que la armó).
+  ownerId String
+  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  microcycles Microcycle[]
+  assignments SplitAssignment[]
+}
+
+// A quién se le asignó una rutina. Es lo que hace que un cliente "tenga"
+// splits sin ser su autor.
+model SplitAssignment {
+  id         String   @id @default(uuid())
+  isActive   Boolean  @default(true)
+  assignedAt DateTime @default(now())
+
+  splitId String
+  split   Split  @relation(fields: [splitId], references: [id], onDelete: Cascade)
+
+  clientId String
+  client   User   @relation("AssignmentClient", fields: [clientId], references: [id], onDelete: Cascade)
+
+  trainerId String
+  trainer   User   @relation("AssignmentTrainer", fields: [trainerId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, splitId])
+}
+
+model Microcycle {
+  id    String @id @default(uuid())
+  name  String
+  order Int
+
+  splitId String
+  split   Split  @relation(fields: [splitId], references: [id], onDelete: Cascade)
+
+  days Day[]
+}
+
+model Day {
+  id    String  @id @default(uuid())
+  name  String
+  order Int
+  focus String?
+
+  microcycleId String
+  microcycle   Microcycle @relation(fields: [microcycleId], references: [id], onDelete: Cascade)
+
+  exercises DayExercise[]
+  sessions  WorkoutSession[]
+}
+
+model DayExercise {
+  id                String  @id @default(uuid())
+  name              String
+  order             Int
+  targetSets        Int
+  targetRestSeconds Int?
+  notes             String?
+
+  // Objetivos como rango (las pantallas nuevas muestran "10 a 12", "1 a 0").
+  targetRepsMin Int?
+  targetRepsMax Int?
+  targetRirMin  Int?
+  targetRirMax  Int?
+  toFailure     Boolean @default(false)
+
+  // Agrupa ejercicios encadenados (superserie 04A + 04B).
+  supersetGroup String?
+
+  dayId String
+  day   Day    @relation(fields: [dayId], references: [id], onDelete: Cascade)
+
+  setLogs SetLog[]
+}
+
+model WorkoutSession {
+  id          String   @id @default(uuid())
+  performedAt DateTime @default(now())
+  notes       String?
+
+  dayId String
+  day   Day    @relation(fields: [dayId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  setLogs SetLog[]
+}
+
+model SetLog {
+  id         String  @id @default(uuid())
+  setNumber  Int
+  actualReps Int?
+  actualRir  Int?
+  weight     Float?
+  completed  Boolean @default(false)
+  skipped    Boolean @default(false)
+
+  sessionId String
+  session   WorkoutSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  dayExerciseId String
+  dayExercise   DayExercise @relation(fields: [dayExerciseId], references: [id], onDelete: Cascade)
+
+  // Clave natural del upsert en lote (PUT /sessions/:id/set-logs).
+  @@unique([sessionId, dayExerciseId, setNumber])
+}
