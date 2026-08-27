@@ -84,7 +84,7 @@
       ]
     },
     "transformIgnorePatterns": [
-      "/node_modules/(?!(@nestjs/config|@nestjs/jwt|@nestjs/passport)/)"
+      "/node_modules/(?!(@nestjs)/)"
     ],
     "collectCoverageFrom": [
       "**/*.(t|j)s"
