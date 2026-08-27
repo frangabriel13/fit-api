@@ -8,5 +8,6 @@ import { SessionsService } from './sessions.service';
 @Module({
   controllers: [SessionsController],
   providers: [SessionsService, SessionsAccessService],
+  exports: [SessionsAccessService],
 })
 export class SessionsModule {}

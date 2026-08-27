@@ -9,6 +9,7 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
 import { ClientsModule } from './clients/clients.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { ProgressModule } from './progress/progress.module';
 import { RoutineModule } from './routine/routine.module';
 import { SessionsModule } from './sessions/sessions.module';
 
@@ -20,6 +21,7 @@ import { SessionsModule } from './sessions/sessions.module';
     ClientsModule,
     RoutineModule,
     SessionsModule,
+    ProgressModule,
   ],
   controllers: [AppController],
   providers: [
