@@ -21,6 +21,8 @@ export type AccessLevel = 'read' | 'write';
  *   - el cliente con la rutina asignada       -> solo lectura
  *   - cualquier otro                          -> 403
  *
+ * Lo marcado como borrado (soft delete) se trata como inexistente: 404.
+ *
  * Recurso inexistente -> 404. Recurso que existe pero no es tuyo -> 403,
  * nunca 401: un 401 le borraría la sesión a alguien que sí está logueado.
  */
@@ -34,8 +36,8 @@ export class RoutineAccessService {
     splitId: string,
     need: AccessLevel,
   ): Promise<string> {
-    const split = await this.prisma.split.findUnique({
-      where: { id: splitId },
+    const split = await this.prisma.split.findFirst({
+      where: { id: splitId, deletedAt: null },
       select: {
         id: true,
         ownerId: true,
@@ -82,8 +84,8 @@ export class RoutineAccessService {
     microcycleId: string,
     need: AccessLevel,
   ): Promise<string> {
-    const micro = await this.prisma.microcycle.findUnique({
-      where: { id: microcycleId },
+    const micro = await this.prisma.microcycle.findFirst({
+      where: { id: microcycleId, deletedAt: null },
       select: { id: true, splitId: true },
     });
     if (!micro) throw new NotFoundException('Microciclo no encontrado');
@@ -96,8 +98,8 @@ export class RoutineAccessService {
     dayId: string,
     need: AccessLevel,
   ): Promise<string> {
-    const day = await this.prisma.day.findUnique({
-      where: { id: dayId },
+    const day = await this.prisma.day.findFirst({
+      where: { id: dayId, deletedAt: null },
       select: { id: true, microcycle: { select: { splitId: true } } },
     });
     if (!day) throw new NotFoundException('Día no encontrado');
@@ -110,8 +112,8 @@ export class RoutineAccessService {
     exerciseId: string,
     need: AccessLevel,
   ): Promise<string> {
-    const exercise = await this.prisma.dayExercise.findUnique({
-      where: { id: exerciseId },
+    const exercise = await this.prisma.dayExercise.findFirst({
+      where: { id: exerciseId, deletedAt: null },
       select: {
         id: true,
         day: { select: { microcycle: { select: { splitId: true } } } },

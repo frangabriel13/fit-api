@@ -9,6 +9,7 @@ import {
 } from './dto/day-exercise.dto';
 import { RoutineAccessService } from './routine-access.service';
 import { toDayExerciseDto } from './routine.mapper';
+import { softDeleteExercise } from './soft-delete';
 import { DayExerciseDto } from './routine.types';
 
 /** Rango de RIR resuelto a partir de lo que haya mandado el cliente. */
@@ -83,8 +84,9 @@ export class ExercisesService {
     return toDayExerciseDto(exercise);
   }
 
+  /** Lógico: si se borrara de verdad, se irían las series ya registradas. */
   async remove(user: UserDto, id: string): Promise<void> {
     await this.access.assertExercise(user, id, 'write');
-    await this.prisma.dayExercise.delete({ where: { id } });
+    await softDeleteExercise(this.prisma, id, new Date());
   }
 }

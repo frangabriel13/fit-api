@@ -45,12 +45,21 @@ export class SessionsAccessService {
   }
 
   /**
-   * Valida que se pueda entrenar ese día: tiene que existir y la rutina que lo
+   * Valida que se pueda usar ese día: tiene que existir y la rutina que lo
    * contiene tiene que ser accesible para el usuario.
+   *
+   * `incluirBorrados` distingue los dos usos: para LEER historial se aceptan
+   * días ya borrados de la rutina (si no, borrar un día escondería las
+   * sesiones que se entrenaron con él, que es lo que el soft delete vino a
+   * evitar); para EMPEZAR una sesión nueva, no.
    */
-  async assertDay(user: UserDto, dayId: string): Promise<void> {
-    const day = await this.prisma.day.findUnique({
-      where: { id: dayId },
+  async assertDay(
+    user: UserDto,
+    dayId: string,
+    { incluirBorrados = false }: { incluirBorrados?: boolean } = {},
+  ): Promise<void> {
+    const day = await this.prisma.day.findFirst({
+      where: { id: dayId, ...(incluirBorrados ? {} : { deletedAt: null }) },
       select: {
         microcycle: {
           select: {

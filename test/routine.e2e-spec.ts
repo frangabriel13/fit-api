@@ -6,6 +6,7 @@ import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import type { LoginResponseDto, UserDto } from '../src/auth/auth.types';
 import { buildValidationPipe } from '../src/common/validation';
+import { purgarSplits } from './helpers';
 import type {
   DayDto,
   DayExerciseDto,
@@ -35,7 +36,7 @@ describe('Árbol de rutinas (e2e)', () => {
   let client: string;
   let ajeno: string;
   let clientId: string;
-  let creados: string[] = [];
+  const creados: string[] = [];
 
   const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
 
@@ -65,10 +66,8 @@ describe('Árbol de rutinas (e2e)', () => {
   });
 
   afterAll(async () => {
-    // Limpieza: borrar todo lo que crearon los tests.
-    for (const id of creados) {
-      await request(http).delete(`/splits/${id}`).set(auth(trainer));
-    }
+    // El DELETE de la API es lógico, así que la limpieza va por debajo.
+    await purgarSplits(app, creados);
     await app.close();
   });
 
@@ -347,7 +346,8 @@ describe('Árbol de rutinas (e2e)', () => {
         .set(auth(trainer))
         .expect(204);
 
-      creados = creados.filter((id) => id !== split.id);
+      // Se sigue rastreando: el DELETE es lógico, así que la fila queda y
+      // hay que purgarla igual al final.
 
       await request(http)
         .get(`/splits/${split.id}`)

@@ -39,7 +39,8 @@ export class SessionsService {
     dayId: string,
     userId?: string,
   ): Promise<WorkoutSessionDto[]> {
-    await this.access.assertDay(user, dayId);
+    // Historial: se lee aunque el día ya no esté en la rutina.
+    await this.access.assertDay(user, dayId, { incluirBorrados: true });
     const target = userId ?? user.id;
     if (target !== user.id) await this.access.assertCanSeeUser(user, target);
 
