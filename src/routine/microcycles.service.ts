@@ -1,19 +1,22 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 
 import { UserDto } from '../auth/auth.types';
 import { patchData } from '../common/patch';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateMicrocycleDto, UpdateMicrocycleDto } from './dto/microcycle.dto';
 import { RoutineAccessService } from './routine-access.service';
-import { toMicrocycleDto } from './routine.mapper';
+import { VIVO, toMicrocycleDto } from './routine.mapper';
+import { softDeleteMicrocycle } from './soft-delete';
 import { MicrocycleDto } from './routine.types';
 
 const WITH_DAYS = {
   days: {
+    where: VIVO,
     orderBy: { order: 'asc' },
-    include: { exercises: { orderBy: { order: 'asc' } } },
+    include: { exercises: { where: VIVO, orderBy: { order: 'asc' } } },
   },
-} as const;
+} satisfies Prisma.MicrocycleInclude;
 
 @Injectable()
 export class MicrocyclesService {
@@ -51,6 +54,7 @@ export class MicrocyclesService {
 
   async remove(user: UserDto, id: string): Promise<void> {
     await this.access.assertMicrocycle(user, id, 'write');
-    await this.prisma.microcycle.delete({ where: { id } });
+    const at = new Date();
+    await this.prisma.$transaction((tx) => softDeleteMicrocycle(tx, id, at));
   }
 }

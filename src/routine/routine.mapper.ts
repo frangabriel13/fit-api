@@ -1,4 +1,4 @@
-import { Day, DayExercise, Microcycle, Split } from '@prisma/client';
+import { Day, DayExercise, Microcycle, Prisma, Split } from '@prisma/client';
 
 import {
   DayDto,
@@ -51,15 +51,24 @@ export const toSplitDto = (s: SplitWithTree): SplitDto => ({
   microcycles: s.microcycles.map(toMicrocycleDto),
 });
 
-/** Include de Prisma que trae el árbol completo, ya ordenado por `order`. */
+/** Filtro de soft delete: lo borrado no se lee. */
+export const VIVO = { deletedAt: null } as const;
+
+/**
+ * Include de Prisma que trae el árbol completo, ordenado por `order` y sin lo
+ * borrado. El filtro va en cada nivel: un día borrado no debe arrastrar sus
+ * ejercicios a la respuesta.
+ */
 export const SPLIT_TREE_INCLUDE = {
   microcycles: {
+    where: VIVO,
     orderBy: { order: 'asc' },
     include: {
       days: {
+        where: VIVO,
         orderBy: { order: 'asc' },
-        include: { exercises: { orderBy: { order: 'asc' } } },
+        include: { exercises: { where: VIVO, orderBy: { order: 'asc' } } },
       },
     },
   },
-} as const;
+} satisfies Prisma.SplitInclude;

@@ -6,6 +6,7 @@ import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import type { LoginResponseDto, UserDto } from '../src/auth/auth.types';
 import { buildValidationPipe } from '../src/common/validation';
+import { purgarSplits } from './helpers';
 import type {
   DayDto,
   DayExerciseDto,
@@ -189,7 +190,7 @@ describe('Sesiones y set-logs (e2e)', () => {
 
   afterAll(async () => {
     // La cascada se lleva días, ejercicios, sesiones y set-logs.
-    await request(http).delete(`/splits/${splitId}`).set(auth(trainer));
+    await purgarSplits(app, [splitId]);
     await app.close();
   });
 

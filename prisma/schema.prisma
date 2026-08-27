@@ -42,6 +42,10 @@ model Split {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  /// Soft delete: borrar de verdad se lleva puesto el historial de series por
+  /// la cascada de FKs. Se marca y se filtra en las lecturas.
+  deletedAt DateTime?
+
   // Autor de la rutina (el entrenador que la armó).
   ownerId String
   owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
@@ -74,6 +78,10 @@ model Microcycle {
   name  String
   order Int
 
+  /// Soft delete: borrar de verdad se lleva puesto el historial de series por
+  /// la cascada de FKs. Se marca y se filtra en las lecturas.
+  deletedAt DateTime?
+
   splitId String
   split   Split  @relation(fields: [splitId], references: [id], onDelete: Cascade)
 
@@ -85,6 +93,10 @@ model Day {
   name  String
   order Int
   focus String?
+
+  /// Soft delete: borrar de verdad se lleva puesto el historial de series por
+  /// la cascada de FKs. Se marca y se filtra en las lecturas.
+  deletedAt DateTime?
 
   microcycleId String
   microcycle   Microcycle @relation(fields: [microcycleId], references: [id], onDelete: Cascade)
@@ -100,6 +112,10 @@ model DayExercise {
   targetSets        Int
   targetRestSeconds Int?
   notes             String?
+
+  /// Soft delete: borrar de verdad se lleva puesto el historial de series por
+  /// la cascada de FKs. Se marca y se filtra en las lecturas.
+  deletedAt DateTime?
 
   // Objetivos como rango (las pantallas nuevas muestran "10 a 12", "1 a 0").
   targetRepsMin Int?

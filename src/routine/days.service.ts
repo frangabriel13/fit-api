@@ -1,16 +1,18 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 
 import { UserDto } from '../auth/auth.types';
 import { patchData } from '../common/patch';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateDayDto, UpdateDayDto } from './dto/day.dto';
 import { RoutineAccessService } from './routine-access.service';
-import { toDayDto } from './routine.mapper';
+import { VIVO, toDayDto } from './routine.mapper';
+import { softDeleteDay } from './soft-delete';
 import { DayDto } from './routine.types';
 
 const WITH_EXERCISES = {
-  exercises: { orderBy: { order: 'asc' } },
-} as const;
+  exercises: { where: VIVO, orderBy: { order: 'asc' } },
+} satisfies Prisma.DayInclude;
 
 @Injectable()
 export class DaysService {
@@ -49,6 +51,7 @@ export class DaysService {
 
   async remove(user: UserDto, id: string): Promise<void> {
     await this.access.assertDay(user, id, 'write');
-    await this.prisma.day.delete({ where: { id } });
+    const at = new Date();
+    await this.prisma.$transaction((tx) => softDeleteDay(tx, id, at));
   }
 }

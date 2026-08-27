@@ -6,7 +6,8 @@ import { patchData } from '../common/patch';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSplitDto, UpdateSplitDto } from './dto/split.dto';
 import { RoutineAccessService } from './routine-access.service';
-import { SPLIT_TREE_INCLUDE, toSplitDto } from './routine.mapper';
+import { SPLIT_TREE_INCLUDE, VIVO, toSplitDto } from './routine.mapper';
+import { softDeleteSplit } from './soft-delete';
 import { SplitDto } from './routine.types';
 
 @Injectable()
@@ -25,7 +26,10 @@ export class SplitsService {
     if (clientId) {
       await this.access.assertIsMyClient(user, clientId);
       const splits = await this.prisma.split.findMany({
-        where: { assignments: { some: { clientId, isActive: true } } },
+        where: {
+          ...VIVO,
+          assignments: { some: { clientId, isActive: true } },
+        },
         include: SPLIT_TREE_INCLUDE,
         orderBy: { createdAt: 'desc' },
       });
@@ -34,8 +38,11 @@ export class SplitsService {
 
     const where =
       user.role === UserRole.trainer
-        ? { ownerId: user.id }
-        : { assignments: { some: { clientId: user.id, isActive: true } } };
+        ? { ...VIVO, ownerId: user.id }
+        : {
+            ...VIVO,
+            assignments: { some: { clientId: user.id, isActive: true } },
+          };
 
     const splits = await this.prisma.split.findMany({
       where,
@@ -104,8 +111,10 @@ export class SplitsService {
     return toSplitDto(split);
   }
 
+  /** Borrado lógico: ver `soft-delete.ts` para el porqué. */
   async remove(user: UserDto, id: string): Promise<void> {
     await this.access.assertSplit(user, id, 'write');
-    await this.prisma.split.delete({ where: { id } });
+    const at = new Date();
+    await this.prisma.$transaction((tx) => softDeleteSplit(tx, id, at));
   }
 }
