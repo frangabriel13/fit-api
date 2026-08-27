@@ -139,11 +139,30 @@ describe('Árbol de rutinas (e2e)', () => {
 
   describe('GET /splits/:id', () => {
     it('viene anidado completo y ordenado por `order`', async () => {
-      const [primero] = (await request(http).get('/splits').set(auth(trainer)))
-        .body as SplitDto[];
+      // Se arma el árbol acá en vez de tomar "el primer split": las otras
+      // suites crean splits contra la misma base y el orden no es estable.
+      const base = await crearSplit();
+      for (const order of [2, 1]) {
+        const micro = (
+          await request(http)
+            .post(`/splits/${base.id}/microcycles`)
+            .set(auth(trainer))
+            .send({ name: `Semana ${order}`, order })
+        ).body as MicrocycleDto;
+        const day = (
+          await request(http)
+            .post(`/microcycles/${micro.id}/days`)
+            .set(auth(trainer))
+            .send({ name: 'Día 1', order: 1 })
+        ).body as DayDto;
+        await request(http)
+          .post(`/days/${day.id}/exercises`)
+          .set(auth(trainer))
+          .send({ name: 'Sentadilla', order: 1, targetSets: 3 });
+      }
 
       const res = await request(http)
-        .get(`/splits/${primero.id}`)
+        .get(`/splits/${base.id}`)
         .set(auth(trainer))
         .expect(200);
       const split = res.body as SplitDto;
@@ -167,11 +186,10 @@ describe('Árbol de rutinas (e2e)', () => {
       request(http).get('/splits/no-es-uuid').set(auth(trainer)).expect(400));
 
     it('rutina de otro -> 403, no 401', async () => {
-      const [primero] = (await request(http).get('/splits').set(auth(trainer)))
-        .body as SplitDto[];
+      const propia = await crearSplit();
 
       await request(http)
-        .get(`/splits/${primero.id}`)
+        .get(`/splits/${propia.id}`)
         .set(auth(ajeno))
         .expect(403);
     });
