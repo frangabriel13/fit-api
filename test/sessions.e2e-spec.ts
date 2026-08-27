@@ -46,13 +46,14 @@ describe('Sesiones y set-logs (e2e)', () => {
   let ex1: string;
   let ex2: string;
   let ejercicioDeOtroDia: string;
+  let microId: string;
 
   const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
 
   /** El estado completo de la grilla, como lo manda el front en cada PUT. */
-  const grilla = (reps: number) => [
+  const grilla = (reps: number, a = ex1, b = ex2) => [
     ...[1, 2, 3].map((n) => ({
-      dayExerciseId: ex1,
+      dayExerciseId: a,
       setNumber: n,
       actualReps: reps,
       actualRir: 1,
@@ -60,7 +61,7 @@ describe('Sesiones y set-logs (e2e)', () => {
       completed: true,
     })),
     ...[1, 2].map((n) => ({
-      dayExerciseId: ex2,
+      dayExerciseId: b,
       setNumber: n,
       actualReps: reps,
       actualRir: 2,
@@ -69,6 +70,8 @@ describe('Sesiones y set-logs (e2e)', () => {
     })),
   ];
 
+  /** Sesión sobre el día compartido. Ojo: el POST es idempotente por día, así
+   *  que devuelve SIEMPRE la misma sesión. Solo para los tests que lo quieren. */
   const nuevaSesion = async (): Promise<WorkoutSessionDto> =>
     (
       await request(http)
@@ -77,6 +80,46 @@ describe('Sesiones y set-logs (e2e)', () => {
         .send({})
         .expect(201)
     ).body as WorkoutSessionDto;
+
+  /**
+   * Contexto aislado: día nuevo con sus propios ejercicios y una sesión limpia.
+   *
+   * Hace falta porque el POST es idempotente por (día, usuario, fecha): dos
+   * tests sobre el mismo día comparten la sesión y se pisan los set-logs.
+   */
+  let nDia = 0;
+  const contextoLimpio = async () => {
+    nDia += 1;
+    const day = (
+      await request(http)
+        .post(`/microcycles/${microId}/days`)
+        .set(auth(trainer))
+        .send({ name: `Día aislado ${nDia}`, order: 100 + nDia })
+    ).body as DayDto;
+
+    const crear = async (name: string, order: number) =>
+      (
+        (
+          await request(http)
+            .post(`/days/${day.id}/exercises`)
+            .set(auth(trainer))
+            .send({ name, order, targetSets: 3 })
+        ).body as DayExerciseDto
+      ).id;
+
+    const a = await crear('Sentadilla', 1);
+    const b = await crear('Peso muerto', 2);
+
+    const session = (
+      await request(http)
+        .post(`/days/${day.id}/sessions`)
+        .set(auth(client))
+        .send({})
+        .expect(201)
+    ).body as WorkoutSessionDto;
+
+    return { dayId: day.id, ex1: a, ex2: b, session };
+  };
 
   beforeAll(async () => {
     const moduleRef: TestingModule = await Test.createTestingModule({
@@ -118,6 +161,7 @@ describe('Sesiones y set-logs (e2e)', () => {
         .set(auth(trainer))
         .send({ name: 'Semana 1', order: 1 })
     ).body as MicrocycleDto;
+    microId = micro.id;
 
     const crearDia = async (name: string, order: number) =>
       (
@@ -188,33 +232,33 @@ describe('Sesiones y set-logs (e2e)', () => {
 
   describe('PUT /sessions/:id/set-logs — el upsert en lote', () => {
     it('crea las series y devuelve la sesión completa', async () => {
-      const { id } = await nuevaSesion();
+      const { session, ex1: a, ex2: b } = await contextoLimpio();
 
       const res = await request(http)
-        .put(`/sessions/${id}/set-logs`)
+        .put(`/sessions/${session.id}/set-logs`)
         .set(auth(client))
-        .send({ setLogs: grilla(10) })
+        .send({ setLogs: grilla(10, a, b) })
         .expect(200);
-      const session = res.body as WorkoutSessionDto;
+      const actualizada = res.body as WorkoutSessionDto;
 
-      expect(session.id).toBe(id);
-      expect(session.setLogs).toHaveLength(5);
+      expect(actualizada.id).toBe(session.id);
+      expect(actualizada.setLogs).toHaveLength(5);
     });
 
     it('la clave natural es (sesión, ejercicio, serie): actualiza, no duplica', async () => {
-      const { id } = await nuevaSesion();
+      const { session, ex1: a, ex2: b } = await contextoLimpio();
       await request(http)
-        .put(`/sessions/${id}/set-logs`)
+        .put(`/sessions/${session.id}/set-logs`)
         .set(auth(client))
-        .send({ setLogs: grilla(10) });
+        .send({ setLogs: grilla(10, a, b) });
 
       const res = await request(http)
-        .put(`/sessions/${id}/set-logs`)
+        .put(`/sessions/${session.id}/set-logs`)
         .set(auth(client))
         .send({
           setLogs: [
             {
-              dayExerciseId: ex1,
+              dayExerciseId: a,
               setNumber: 1,
               actualReps: 12,
               actualRir: 0,
@@ -224,63 +268,58 @@ describe('Sesiones y set-logs (e2e)', () => {
           ],
         })
         .expect(200);
-      const session = res.body as WorkoutSessionDto;
+      const actualizada = res.body as WorkoutSessionDto;
 
-      expect(session.setLogs).toHaveLength(5);
-      const serie = session.setLogs.find(
-        (l) => l.dayExerciseId === ex1 && l.setNumber === 1,
+      expect(actualizada.setLogs).toHaveLength(5);
+      const serie = actualizada.setLogs.find(
+        (l) => l.dayExerciseId === a && l.setNumber === 1,
       );
       expect(serie?.actualReps).toBe(12);
       expect(serie?.weight).toBe(99);
     });
 
     it('NO es reemplazo total: lo que no viene en el body queda intacto', async () => {
-      const { id } = await nuevaSesion();
+      const { session, ex1: a, ex2: b } = await contextoLimpio();
       await request(http)
-        .put(`/sessions/${id}/set-logs`)
+        .put(`/sessions/${session.id}/set-logs`)
         .set(auth(client))
-        .send({ setLogs: grilla(10) });
+        .send({ setLogs: grilla(10, a, b) });
 
       const res = await request(http)
-        .put(`/sessions/${id}/set-logs`)
+        .put(`/sessions/${session.id}/set-logs`)
         .set(auth(client))
         .send({
           setLogs: [
-            {
-              dayExerciseId: ex1,
-              setNumber: 1,
-              actualReps: 5,
-              completed: true,
-            },
+            { dayExerciseId: a, setNumber: 1, actualReps: 5, completed: true },
           ],
         });
-      const session = res.body as WorkoutSessionDto;
+      const actualizada = res.body as WorkoutSessionDto;
 
-      expect(session.setLogs).toHaveLength(5);
-      const intacta = session.setLogs.find(
-        (l) => l.dayExerciseId === ex2 && l.setNumber === 1,
+      expect(actualizada.setLogs).toHaveLength(5);
+      const intacta = actualizada.setLogs.find(
+        (l) => l.dayExerciseId === b && l.setNumber === 1,
       );
       expect(intacta?.actualReps).toBe(10);
       expect(intacta?.weight).toBe(101);
     });
 
     it('campo numérico ausente se guarda NULL, no 0', async () => {
-      const { id } = await nuevaSesion();
+      const { session, ex1: a, ex2: b } = await contextoLimpio();
       await request(http)
-        .put(`/sessions/${id}/set-logs`)
+        .put(`/sessions/${session.id}/set-logs`)
         .set(auth(client))
-        .send({ setLogs: grilla(10) });
+        .send({ setLogs: grilla(10, a, b) });
 
       const res = await request(http)
-        .put(`/sessions/${id}/set-logs`)
+        .put(`/sessions/${session.id}/set-logs`)
         .set(auth(client))
         .send({
-          setLogs: [{ dayExerciseId: ex1, setNumber: 1, completed: false }],
+          setLogs: [{ dayExerciseId: a, setNumber: 1, completed: false }],
         });
-      const session = res.body as WorkoutSessionDto;
+      const actualizada = res.body as WorkoutSessionDto;
 
-      const serie = session.setLogs.find(
-        (l) => l.dayExerciseId === ex1 && l.setNumber === 1,
+      const serie = actualizada.setLogs.find(
+        (l) => l.dayExerciseId === a && l.setNumber === 1,
       );
       expect(serie?.actualReps).toBeNull();
       expect(serie?.actualRir).toBeNull();
@@ -289,12 +328,12 @@ describe('Sesiones y set-logs (e2e)', () => {
     });
 
     it('es idempotente: el mismo payload dos veces da el mismo estado', async () => {
-      const { id } = await nuevaSesion();
+      const { session, ex1: a, ex2: b } = await contextoLimpio();
       const enviar = () =>
         request(http)
-          .put(`/sessions/${id}/set-logs`)
+          .put(`/sessions/${session.id}/set-logs`)
           .set(auth(client))
-          .send({ setLogs: grilla(8) });
+          .send({ setLogs: grilla(8, a, b) });
 
       const primera = ((await enviar()).body as WorkoutSessionDto).setLogs;
       const segunda = ((await enviar()).body as WorkoutSessionDto).setLogs;
@@ -309,23 +348,23 @@ describe('Sesiones y set-logs (e2e)', () => {
     });
 
     it('aguanta llamadas encimadas sin duplicar ni fallar', async () => {
-      const { id } = await nuevaSesion();
+      const { session, ex1: a, ex2: b } = await contextoLimpio();
 
       // El front lo dispara con debounce de 800ms y al toque al completar una
       // serie: los requests se pisan.
       const respuestas = await Promise.all(
         Array.from({ length: 15 }, (_, i) =>
           request(http)
-            .put(`/sessions/${id}/set-logs`)
+            .put(`/sessions/${session.id}/set-logs`)
             .set(auth(client))
-            .send({ setLogs: grilla(10 + i) }),
+            .send({ setLogs: grilla(10 + i, a, b) }),
         ),
       );
 
       respuestas.forEach((r) => expect(r.status).toBe(200));
 
       const final = (
-        await request(http).get(`/sessions/${id}`).set(auth(client))
+        await request(http).get(`/sessions/${session.id}`).set(auth(client))
       ).body as WorkoutSessionDto;
 
       expect(final.setLogs).toHaveLength(5);
@@ -336,10 +375,10 @@ describe('Sesiones y set-logs (e2e)', () => {
     });
 
     it('un ejercicio de otro día -> 400, no 403: es payload mal armado', async () => {
-      const { id } = await nuevaSesion();
+      const { session } = await contextoLimpio();
 
       await request(http)
-        .put(`/sessions/${id}/set-logs`)
+        .put(`/sessions/${session.id}/set-logs`)
         .set(auth(client))
         .send({
           setLogs: [
@@ -354,44 +393,39 @@ describe('Sesiones y set-logs (e2e)', () => {
     });
 
     it('acepta series más allá de `targetSets` (series extra)', async () => {
-      const { id } = await nuevaSesion();
+      const { session, ex1: a } = await contextoLimpio();
 
       const res = await request(http)
-        .put(`/sessions/${id}/set-logs`)
+        .put(`/sessions/${session.id}/set-logs`)
         .set(auth(client))
         .send({
           setLogs: [
-            {
-              dayExerciseId: ex1,
-              setNumber: 7,
-              actualReps: 6,
-              completed: true,
-            },
+            { dayExerciseId: a, setNumber: 7, actualReps: 6, completed: true },
           ],
         })
         .expect(200);
 
-      const session = res.body as WorkoutSessionDto;
-      expect(session.setLogs.some((l) => l.setNumber === 7)).toBe(true);
+      const actualizada = res.body as WorkoutSessionDto;
+      expect(actualizada.setLogs.some((l) => l.setNumber === 7)).toBe(true);
     });
 
     it('setNumber 0 -> 400', async () => {
-      const { id } = await nuevaSesion();
+      const { session, ex1: a } = await contextoLimpio();
 
       await request(http)
-        .put(`/sessions/${id}/set-logs`)
+        .put(`/sessions/${session.id}/set-logs`)
         .set(auth(client))
         .send({
-          setLogs: [{ dayExerciseId: ex1, setNumber: 0, completed: true }],
+          setLogs: [{ dayExerciseId: a, setNumber: 0, completed: true }],
         })
         .expect(400);
     });
 
     it('sesión de otro -> 403, nunca 401', async () => {
-      const { id } = await nuevaSesion();
+      const { session } = await contextoLimpio();
 
       await request(http)
-        .put(`/sessions/${id}/set-logs`)
+        .put(`/sessions/${session.id}/set-logs`)
         .set(auth(ajeno))
         .send({ setLogs: [] })
         .expect(403);
@@ -400,15 +434,15 @@ describe('Sesiones y set-logs (e2e)', () => {
 
   describe('PATCH /set-logs/:id', () => {
     it('ausente = no tocar (la regla opuesta a la del PUT)', async () => {
-      const { id } = await nuevaSesion();
-      const session = (
+      const { session, ex1: a, ex2: b } = await contextoLimpio();
+      const conLogs = (
         await request(http)
-          .put(`/sessions/${id}/set-logs`)
+          .put(`/sessions/${session.id}/set-logs`)
           .set(auth(client))
-          .send({ setLogs: grilla(10) })
+          .send({ setLogs: grilla(10, a, b) })
       ).body as WorkoutSessionDto;
 
-      const serie = session.setLogs[0];
+      const serie = conLogs.setLogs[0];
 
       const res = await request(http)
         .patch(`/set-logs/${serie.id}`)
@@ -428,6 +462,94 @@ describe('Sesiones y set-logs (e2e)', () => {
         .set(auth(client))
         .send({ completed: true })
         .expect(404));
+  });
+
+  describe('DELETE /set-logs/:id', () => {
+    it('borra la serie y deja de aparecer en la sesión', async () => {
+      const { session, ex1: a, ex2: b } = await contextoLimpio();
+      const conLogs = (
+        await request(http)
+          .put(`/sessions/${session.id}/set-logs`)
+          .set(auth(client))
+          .send({ setLogs: grilla(10, a, b) })
+      ).body as WorkoutSessionDto;
+
+      expect(conLogs.setLogs).toHaveLength(5);
+      const serie = conLogs.setLogs[0];
+
+      await request(http)
+        .delete(`/set-logs/${serie.id}`)
+        .set(auth(client))
+        .expect(204);
+
+      const despues = (
+        await request(http).get(`/sessions/${session.id}`).set(auth(client))
+      ).body as WorkoutSessionDto;
+
+      expect(despues.setLogs).toHaveLength(4);
+      expect(despues.setLogs.map((l) => l.id)).not.toContain(serie.id);
+    });
+
+    it('borrada de verdad: un PUT posterior no la resucita', async () => {
+      const { session, ex1: a, ex2: b } = await contextoLimpio();
+      const conLogs = (
+        await request(http)
+          .put(`/sessions/${session.id}/set-logs`)
+          .set(auth(client))
+          .send({ setLogs: grilla(10, a, b) })
+      ).body as WorkoutSessionDto;
+
+      const serie = conLogs.setLogs.find(
+        (l) => l.dayExerciseId === b && l.setNumber === 2,
+      );
+      expect(serie).toBeDefined();
+
+      await request(http)
+        .delete(`/set-logs/${serie!.id}`)
+        .set(auth(client))
+        .expect(204);
+
+      // Un PUT que no incluye esa serie no debe traerla de vuelta.
+      const despues = (
+        await request(http)
+          .put(`/sessions/${session.id}/set-logs`)
+          .set(auth(client))
+          .send({
+            setLogs: [
+              {
+                dayExerciseId: a,
+                setNumber: 1,
+                actualReps: 7,
+                completed: true,
+              },
+            ],
+          })
+      ).body as WorkoutSessionDto;
+
+      expect(despues.setLogs).toHaveLength(4);
+      expect(
+        despues.setLogs.some((l) => l.dayExerciseId === b && l.setNumber === 2),
+      ).toBe(false);
+    });
+
+    it('serie de otro -> 403; inexistente -> 404', async () => {
+      const { session, ex1: a, ex2: b } = await contextoLimpio();
+      const conLogs = (
+        await request(http)
+          .put(`/sessions/${session.id}/set-logs`)
+          .set(auth(client))
+          .send({ setLogs: grilla(10, a, b) })
+      ).body as WorkoutSessionDto;
+
+      await request(http)
+        .delete(`/set-logs/${conLogs.setLogs[0].id}`)
+        .set(auth(ajeno))
+        .expect(403);
+      await request(http)
+        .delete(`/set-logs/${UUID_INEXISTENTE}`)
+        .set(auth(client))
+        .expect(404);
+    });
   });
 
   describe('GET de sesiones', () => {

@@ -173,18 +173,36 @@ export class SessionsService {
     setLogId: string,
     dto: SetLogPatchDto,
   ): Promise<SetLogDto> {
-    const log = await this.prisma.setLog.findUnique({
-      where: { id: setLogId },
-      select: { sessionId: true },
-    });
-    if (!log) throw new NotFoundException('Serie no encontrada');
-    await this.access.assertSession(user, log.sessionId);
+    await this.assertSetLog(user, setLogId);
 
     const actualizado = await this.prisma.setLog.update({
       where: { id: setLogId },
       data: patchData(dto),
     });
     return toSetLogDto(actualizado);
+  }
+
+  /**
+   * EXTENSIÓN al contrato: no existe `DELETE /set-logs/:id`.
+   *
+   * Sin esto no hay forma de borrar una serie. El upsert del PUT nunca borra,
+   * y cuando el usuario vacía una fila el front deja de mandarla
+   * (`use-set-log-grid.ts` saltea las filas en blanco), así que la fila vieja
+   * queda en la base y reaparece al recargar: el borrado se revierte solo.
+   */
+  async removeSetLog(user: UserDto, setLogId: string): Promise<void> {
+    await this.assertSetLog(user, setLogId);
+    await this.prisma.setLog.delete({ where: { id: setLogId } });
+  }
+
+  /** Resuelve una serie y valida el acceso a su sesión. */
+  private async assertSetLog(user: UserDto, setLogId: string): Promise<void> {
+    const log = await this.prisma.setLog.findUnique({
+      where: { id: setLogId },
+      select: { sessionId: true },
+    });
+    if (!log) throw new NotFoundException('Serie no encontrada');
+    await this.access.assertSession(user, log.sessionId);
   }
 
   /**
