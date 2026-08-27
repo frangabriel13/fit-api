@@ -29,7 +29,7 @@ export class SplitsController {
     @CurrentUser() user: UserDto,
     @Query() query: ListSplitsQueryDto,
   ): Promise<SplitDto[]> {
-    return this.splits.findAll(user, query.clientId);
+    return this.splits.findAll(user, query.clientId, query);
   }
 
   /** Anidado completo: Split -> microcycles -> days -> exercises. */

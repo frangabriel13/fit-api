@@ -7,6 +7,7 @@ import { ConfigService } from '@nestjs/config';
 
 import { UserDto } from '../auth/auth.types';
 import { dayKey } from '../common/day-key';
+import { PaginationQueryDto, paginar } from '../common/dto/pagination.dto';
 import { patchData } from '../common/patch';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSessionDto } from './dto/session.dto';
@@ -38,6 +39,7 @@ export class SessionsService {
     user: UserDto,
     dayId: string,
     userId?: string,
+    pagina: PaginationQueryDto = {},
   ): Promise<WorkoutSessionDto[]> {
     // Historial: se lee aunque el día ya no esté en la rutina.
     await this.access.assertDay(user, dayId, { incluirBorrados: true });
@@ -48,6 +50,7 @@ export class SessionsService {
       where: { dayId, userId: target },
       include: SESSION_INCLUDE,
       orderBy: { performedAt: 'desc' },
+      ...paginar(pagina),
     });
     return sessions.map(toSessionDto);
   }

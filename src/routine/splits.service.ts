@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 
 import { UserDto } from '../auth/auth.types';
+import { PaginationQueryDto, paginar } from '../common/dto/pagination.dto';
 import { patchData } from '../common/patch';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSplitDto, UpdateSplitDto } from './dto/split.dto';
@@ -22,7 +23,11 @@ export class SplitsService {
    * tiene asignadas. Con `clientId` (extensión al contrato): las de ese
    * cliente, si es de tu cartera.
    */
-  async findAll(user: UserDto, clientId?: string): Promise<SplitDto[]> {
+  async findAll(
+    user: UserDto,
+    clientId?: string,
+    pagina: PaginationQueryDto = {},
+  ): Promise<SplitDto[]> {
     if (clientId) {
       await this.access.assertIsMyClient(user, clientId);
       const splits = await this.prisma.split.findMany({
@@ -32,6 +37,7 @@ export class SplitsService {
         },
         include: SPLIT_TREE_INCLUDE,
         orderBy: { createdAt: 'desc' },
+        ...paginar(pagina),
       });
       return splits.map(toSplitDto);
     }
@@ -48,6 +54,7 @@ export class SplitsService {
       where,
       include: SPLIT_TREE_INCLUDE,
       orderBy: { createdAt: 'desc' },
+      ...paginar(pagina),
     });
     return splits.map(toSplitDto);
   }

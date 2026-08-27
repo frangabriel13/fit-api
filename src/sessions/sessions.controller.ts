@@ -29,7 +29,7 @@ export class SessionsController {
     @Param('dayId', ParseUUIDPipe) dayId: string,
     @Query() query: ListSessionsQueryDto,
   ): Promise<WorkoutSessionDto[]> {
-    return this.sessions.findByDay(user, dayId, query.userId);
+    return this.sessions.findByDay(user, dayId, query.userId, query);
   }
 
   @Get('sessions/:id')
