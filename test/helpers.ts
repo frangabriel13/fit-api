@@ -18,3 +18,20 @@ export const purgarSplits = async (
   const prisma = app.get(PrismaService);
   await prisma.split.deleteMany({ where: { id: { in: ids } } });
 };
+
+/**
+ * Borra los usuarios de prueba que crea el suite de alta.
+ *
+ * No hay endpoint para dar de baja un usuario (borrarlo de verdad se llevaría
+ * puesto su historial por la cascada de FKs), así que los tests limpian por
+ * debajo de la API. Los usuarios que crea el suite no tienen historial.
+ */
+export const purgarUsuariosDePrueba = async (
+  app: INestApplication,
+  prefijoEmail: string,
+): Promise<void> => {
+  const prisma = app.get(PrismaService);
+  await prisma.user.deleteMany({
+    where: { email: { startsWith: prefijoEmail } },
+  });
+};

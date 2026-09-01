@@ -20,7 +20,8 @@
     "test:e2e": "jest --config ./test/jest-e2e.json --runInBand",
     "db:seed": "node --no-warnings=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env prisma/seed.ts",
     "db:studio": "prisma studio",
-    "db:purge": "node --no-warnings=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env prisma/purge.ts"
+    "db:purge": "node --no-warnings=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env prisma/purge.ts",
+    "user:create": "node --no-warnings=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env prisma/create-user.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
