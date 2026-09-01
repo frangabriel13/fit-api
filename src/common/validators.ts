@@ -1,3 +1,4 @@
+import { Transform } from 'class-transformer';
 import { ValidateIf } from 'class-validator';
 
 /**
@@ -13,3 +14,12 @@ import { ValidateIf } from 'class-validator';
  */
 export const OptionalDefined = () =>
   ValidateIf((_object: unknown, value: unknown) => value !== undefined);
+
+/**
+ * Recorta los espacios antes de validar, para que un `"   "` no pase el
+ * `@MinLength(1)` y termine guardado como nombre vacío.
+ */
+export const Trim = () =>
+  Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  );
