@@ -1,6 +1,5 @@
 import { Type } from 'class-transformer';
 import {
-  ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsInt,
@@ -11,7 +10,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 
-import { OptionalDefined } from '../../common/validators';
+import { MaxItems, OptionalDefined } from '../../common/validators';
 
 /**
  * Una serie del lote de `PUT /sessions/:id/set-logs`.
@@ -53,9 +52,19 @@ export class SetLogUpsertDto {
   skipped?: boolean;
 }
 
+/** Tope del lote. Es una guarda contra un payload absurdo, no un límite real:
+ *  un día de entrenamiento no pasa de unas decenas de series. */
+const MAX_LOTE = 500;
+
 export class UpsertSetLogsDto {
-  @IsArray()
-  @ArrayMaxSize(500, { message: 'demasiadas series en un solo lote' })
+  /**
+   * Mandar el array pelado en vez de `{ setLogs: [...] }` tiene que decir eso
+   * y no otra cosa: ver `MaxItems`.
+   */
+  @IsArray({ message: 'setLogs tiene que ser un array de series' })
+  @MaxItems(MAX_LOTE, {
+    message: `demasiadas series en un solo lote (máximo ${MAX_LOTE})`,
+  })
   @ValidateNested({ each: true })
   @Type(() => SetLogUpsertDto)
   setLogs: SetLogUpsertDto[];

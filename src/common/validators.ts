@@ -1,5 +1,9 @@
 import { Transform } from 'class-transformer';
-import { ValidateIf } from 'class-validator';
+import {
+  ValidateIf,
+  ValidationOptions,
+  registerDecorator,
+} from 'class-validator';
 
 /**
  * Marca un campo como opcional en un PATCH, pero SIN aceptar `null`.
@@ -23,3 +27,28 @@ export const Trim = () =>
   Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? value.trim() : value,
   );
+
+/**
+ * Igual que `@ArrayMaxSize`, pero se calla cuando el valor ni siquiera es un
+ * array: de eso ya se queja `@IsArray`.
+ *
+ * `arrayMaxSize` de class-validator devuelve false ante cualquier cosa que no
+ * sea un array, así que con un body mal formado fallaban los dos validadores y
+ * el mensaje del tope podía salir primero: mandaba a buscar un problema de
+ * cantidad cuando lo que estaba mal era la forma. `@ValidateIf` no sirve acá
+ * porque saltea TODA la propiedad, incluido el `@IsArray`.
+ */
+export const MaxItems = (max: number, options?: ValidationOptions) =>
+  function (object: object, propertyName: string): void {
+    registerDecorator({
+      name: 'maxItems',
+      target: object.constructor,
+      propertyName,
+      constraints: [max],
+      options,
+      validator: {
+        validate: (value: unknown): boolean =>
+          !Array.isArray(value) || value.length <= max,
+      },
+    });
+  };

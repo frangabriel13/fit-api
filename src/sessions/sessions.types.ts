@@ -17,6 +17,15 @@ export interface WorkoutSessionDto {
   dayId: string;
   /** ISO 8601 con zona (UTC). El navegador lo convierte a hora local. */
   performedAt: string;
+  /**
+   * EXTENSIÓN: null mientras la sesión sigue abierta.
+   *
+   * Sin esto no se distingue "entrenó y terminó" de "abrió la pantalla y se
+   * fue", y el chip de tendencia compara contra lo levantado hasta ahora: a
+   * mitad de sesión, con solo la entrada en calor cargada, muestra una caída
+   * que no existe.
+   */
+  completedAt: string | null;
   notes: string | null;
   setLogs: SetLogDto[];
 }

@@ -20,8 +20,11 @@ export class AuthService {
   ) {}
 
   async login({ email, password }: LoginDto): Promise<LoginResponseDto> {
-    const user = await this.prisma.user.findUnique({
-      where: { email: normalizeEmail(email) },
+    // La baja es lógica: el usuario sigue en la base con su historial, pero no
+    // entra más. Se busca con findFirst y no findUnique porque el filtro deja
+    // de ser solo la clave única.
+    const user = await this.prisma.user.findFirst({
+      where: { email: normalizeEmail(email), deletedAt: null },
     });
 
     // Mismo error para "no existe" y "contraseña incorrecta": no hay que
@@ -36,6 +39,7 @@ export class AuthService {
       email: user.email,
       name: user.name,
       role: user.role,
+      mustChangePassword: user.mustChangePassword,
     };
     const payload: JwtPayload = {
       sub: user.id,
@@ -63,7 +67,9 @@ export class AuthService {
     userId: string,
     { currentPassword, newPassword }: ChangePasswordDto,
   ): Promise<void> {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+    });
     // El token es válido pero el usuario ya no está: eso sí es 401.
     if (!user) throw new UnauthorizedException('Sesión inválida');
 
@@ -76,7 +82,11 @@ export class AuthService {
 
     await this.prisma.user.update({
       where: { id: userId },
-      data: { password: await hashPassword(newPassword) },
+      data: {
+        password: await hashPassword(newPassword),
+        // Ya la eligió el propio usuario: deja de ser provisoria.
+        mustChangePassword: false,
+      },
     });
   }
 }

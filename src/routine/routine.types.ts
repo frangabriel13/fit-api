@@ -41,9 +41,23 @@ export interface MicrocycleDto {
   days: DayDto[];
 }
 
+/** A quién está asignada una rutina. */
+export interface AssignedClientDto {
+  id: string;
+  name: string;
+}
+
 export interface SplitDto {
   id: string;
   name: string;
   description: string | null;
   microcycles: MicrocycleDto[];
+  /**
+   * EXTENSIÓN: los clientes con la rutina asignada y activa.
+   *
+   * Es un array y no un cliente suelto porque una misma rutina se le puede
+   * asignar a varias personas. Lo que NO puede pasar es al revés —un cliente
+   * con dos rutinas—: eso lo corta el 409 al asignar.
+   */
+  clients: AssignedClientDto[];
 }

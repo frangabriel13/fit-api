@@ -1,8 +1,4 @@
-import { IsOptional, IsUUID } from 'class-validator';
+import { TargetUserQueryDto } from '../../common/dto/target-user.dto';
 
 /** Sin `userId` es el progreso de quien llama; con él, el de ese cliente. */
-export class ProgressQueryDto {
-  @IsOptional()
-  @IsUUID()
-  userId?: string;
-}
+export class ProgressQueryDto extends TargetUserQueryDto {}

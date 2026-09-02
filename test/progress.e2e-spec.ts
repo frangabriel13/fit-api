@@ -14,7 +14,12 @@ import type {
   SplitDto,
 } from '../src/routine/routine.types';
 import type { WorkoutSessionDto } from '../src/sessions/sessions.types';
-import { purgarSplits } from './helpers';
+import {
+  crearClienteDePrueba,
+  PREFIJO_CLIENTE,
+  purgarSplits,
+  purgarUsuariosDePrueba,
+} from './helpers';
 
 /**
  * Progreso del macrociclo.
@@ -27,7 +32,6 @@ const TRAINER = {
   email: 'mansilla.franco.1@gmail.com',
   password: 'fitdev1234',
 };
-const CLIENT = { email: 'diamela@fitness.com', password: 'fitdev1234' };
 const AJENO = { email: 'user1@fitback.dev', password: 'fitdev1234' };
 
 const UUID_INEXISTENTE = '00000000-0000-4000-8000-000000000000';
@@ -66,15 +70,12 @@ describe('Progreso del macrociclo (e2e)', () => {
       ).accessToken;
 
     trainer = await login(TRAINER);
-    client = await login(CLIENT);
     ajeno = await login(AJENO);
-    clientId = (
-      (await request(http).get('/clients').set(auth(trainer))).body as UserDto[]
-    )[0].id;
   });
 
   afterAll(async () => {
     await purgarSplits(app, creados);
+    await purgarUsuariosDePrueba(app, PREFIJO_CLIENTE);
     await app.close();
   });
 
@@ -83,6 +84,16 @@ describe('Progreso del macrociclo (e2e)', () => {
     totalSemanas: number,
     nombres: string[] = ['Hip Thrust', 'Peso Muerto Rumano'],
   ) => {
+    // Un cliente descartable por macrociclo: cada uno solo puede tener una
+    // rutina activa, así que dos macrociclos no entran en la misma persona.
+    const cliente = await crearClienteDePrueba(
+      http,
+      trainer,
+      'Cliente progreso',
+    );
+    client = cliente.token;
+    clientId = cliente.id;
+
     const split = (
       await request(http)
         .post('/splits')

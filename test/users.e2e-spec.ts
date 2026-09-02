@@ -6,6 +6,7 @@ import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import type { LoginResponseDto, UserDto } from '../src/auth/auth.types';
 import { buildValidationPipe } from '../src/common/validation';
+import { PrismaService } from '../src/prisma/prisma.service';
 import { purgarUsuariosDePrueba } from './helpers';
 
 /**
@@ -23,6 +24,7 @@ const CLIENT = { email: 'diamela@fitness.com', password: 'fitdev1234' };
 
 const PREFIJO = 'e2e-alta-';
 const PASSWORD = 'provisoria123';
+const UUID_INEXISTENTE = '00000000-0000-4000-8000-000000000000';
 
 interface ErrorBody {
   message: string;
@@ -40,6 +42,8 @@ describe('Alta de usuarios (e2e)', () => {
 
   const nuevoEmail = () =>
     `${PREFIJO}${Date.now()}-${contador++}@fitfront.test`;
+
+  const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
 
   const crearCliente = (body: object, token = trainerToken) =>
     request(http)
@@ -99,7 +103,14 @@ describe('Alta de usuarios (e2e)', () => {
     it('devuelve el User del contrato, sin password y con role client', async () => {
       const { user, email } = await clienteNuevo();
 
-      expect(Object.keys(user).sort()).toEqual(['email', 'id', 'name', 'role']);
+      expect(Object.keys(user).sort()).toEqual([
+        'email',
+        'id',
+        'mustChangePassword',
+        'name',
+        'role',
+      ]);
+      expect(user.mustChangePassword).toBe(true);
       expect(user).not.toHaveProperty('password');
       expect(user.email).toBe(email);
       expect(user.role).toBe('client');
@@ -263,6 +274,205 @@ describe('Alta de usuarios (e2e)', () => {
 
       await login({ email, password }).expect(401);
       await login({ email, password: nueva }).expect(200);
+    });
+  });
+  describe('PATCH /clients/:id — corrección', () => {
+    it('corrige el nombre y el email', async () => {
+      const { user } = await clienteNuevo();
+      const email = nuevoEmail();
+
+      const res = await request(http)
+        .patch(`/clients/${user.id}`)
+        .set(auth(trainerToken))
+        .send({
+          name: '  Nombre Corregido  ',
+          email: `  ${email.toUpperCase()}  `,
+        })
+        .expect(200);
+
+      const corregido = res.body as UserDto;
+      expect(corregido.name).toBe('Nombre Corregido');
+      expect(corregido.email).toBe(email);
+      await login({ email, password: PASSWORD }).expect(200);
+    });
+
+    it('campo ausente = no tocar', async () => {
+      const { user, email } = await clienteNuevo();
+
+      const res = await request(http)
+        .patch(`/clients/${user.id}`)
+        .set(auth(trainerToken))
+        .send({ name: 'Solo el nombre' })
+        .expect(200);
+
+      expect((res.body as UserDto).email).toBe(email);
+    });
+
+    it('resetear la contraseña la vuelve a marcar como provisoria', async () => {
+      const { user, email } = await clienteNuevo();
+
+      // El cliente ya la había elegido: deja de ser provisoria.
+      const suToken = (
+        (await login({ email, password: PASSWORD }).expect(200))
+          .body as LoginResponseDto
+      ).accessToken;
+      await request(http)
+        .post('/auth/change-password')
+        .set(auth(suToken))
+        .send({ currentPassword: PASSWORD, newPassword: 'elegidaporel123' })
+        .expect(204);
+
+      const res = await request(http)
+        .patch(`/clients/${user.id}`)
+        .set(auth(trainerToken))
+        .send({ password: 'reseteada9876' })
+        .expect(200);
+
+      expect((res.body as UserDto).mustChangePassword).toBe(true);
+      await login({ email, password: 'elegidaporel123' }).expect(401);
+      await login({ email, password: 'reseteada9876' }).expect(200);
+    });
+
+    it('email ya usado -> 409', async () => {
+      const primero = await clienteNuevo();
+      const segundo = await clienteNuevo();
+
+      await request(http)
+        .patch(`/clients/${segundo.user.id}`)
+        .set(auth(trainerToken))
+        .send({ email: primero.email })
+        .expect(409);
+    });
+
+    it('nombre vacío -> 400; email inválido -> 400', async () => {
+      const { user } = await clienteNuevo();
+
+      await request(http)
+        .patch(`/clients/${user.id}`)
+        .set(auth(trainerToken))
+        .send({ name: '   ' })
+        .expect(400);
+      await request(http)
+        .patch(`/clients/${user.id}`)
+        .set(auth(trainerToken))
+        .send({ email: 'no-es-un-email' })
+        .expect(400);
+    });
+
+    it('un cliente de otro entrenador -> 404, no 403: no se filtra que existe', async () => {
+      const { user } = await clienteNuevo();
+
+      await request(http)
+        .patch(`/clients/${user.id}`)
+        .set(auth(clientToken))
+        .expect(403); // el rol ya lo corta antes
+
+      // Y un id que no es de su cartera, con el rol correcto:
+      await request(http)
+        .patch(`/clients/${UUID_INEXISTENTE}`)
+        .set(auth(trainerToken))
+        .send({ name: 'Nadie' })
+        .expect(404);
+    });
+  });
+
+  describe('DELETE /clients/:id — baja lógica', () => {
+    it('sale de la cartera y no puede entrar más', async () => {
+      const { user, email } = await clienteNuevo();
+
+      await request(http)
+        .delete(`/clients/${user.id}`)
+        .set(auth(trainerToken))
+        .expect(204);
+
+      const cartera = (
+        await request(http).get('/clients').set(auth(trainerToken)).expect(200)
+      ).body as UserDto[];
+      expect(cartera.map((c) => c.id)).not.toContain(user.id);
+
+      await login({ email, password: PASSWORD }).expect(401);
+    });
+
+    it('le corta la sesión abierta en el acto, sin esperar a que venza el token', async () => {
+      const { user, email } = await clienteNuevo();
+      const suToken = (
+        (await login({ email, password: PASSWORD }).expect(200))
+          .body as LoginResponseDto
+      ).accessToken;
+
+      await request(http).get('/auth/me').set(auth(suToken)).expect(200);
+
+      await request(http)
+        .delete(`/clients/${user.id}`)
+        .set(auth(trainerToken))
+        .expect(204);
+
+      await request(http).get('/auth/me').set(auth(suToken)).expect(401);
+    });
+
+    it('es lógica: el usuario sigue en la base con su historial', async () => {
+      const { user } = await clienteNuevo();
+
+      await request(http)
+        .delete(`/clients/${user.id}`)
+        .set(auth(trainerToken))
+        .expect(204);
+
+      const prisma = app.get(PrismaService);
+      const enLaBase = await prisma.user.findUnique({
+        where: { id: user.id },
+        select: { id: true, deletedAt: true },
+      });
+      expect(enLaBase).not.toBeNull();
+      expect(enLaBase?.deletedAt).toBeInstanceOf(Date);
+    });
+
+    it('darla de baja dos veces -> 404 la segunda', async () => {
+      const { user } = await clienteNuevo();
+
+      await request(http)
+        .delete(`/clients/${user.id}`)
+        .set(auth(trainerToken))
+        .expect(204);
+      await request(http)
+        .delete(`/clients/${user.id}`)
+        .set(auth(trainerToken))
+        .expect(404);
+    });
+
+    it('como client -> 403, nunca 401', async () => {
+      const { user } = await clienteNuevo();
+
+      await request(http)
+        .delete(`/clients/${user.id}`)
+        .set(auth(clientToken))
+        .expect(403);
+    });
+  });
+
+  describe('mustChangePassword', () => {
+    it('nace en true y lo apaga el cambio de contraseña', async () => {
+      const { email } = await clienteNuevo();
+
+      const antes = (await login({ email, password: PASSWORD }).expect(200))
+        .body as LoginResponseDto;
+      expect(antes.user.mustChangePassword).toBe(true);
+
+      await request(http)
+        .post('/auth/change-password')
+        .set(auth(antes.accessToken))
+        .send({ currentPassword: PASSWORD, newPassword: 'yalaelegi1234' })
+        .expect(204);
+
+      const despues = (
+        await login({ email, password: 'yalaelegi1234' }).expect(200)
+      ).body as LoginResponseDto;
+      expect(despues.user.mustChangePassword).toBe(false);
+      const yo = await request(http)
+        .get('/auth/me')
+        .set(auth(despues.accessToken))
+        .expect(200);
+      expect((yo.body as UserDto).mustChangePassword).toBe(false);
     });
   });
 });

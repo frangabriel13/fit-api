@@ -6,6 +6,12 @@ export interface UserDto {
   email: string;
   name: string;
   role: UserRole;
+  /**
+   * EXTENSIÓN: la contraseña la eligió otro (alta por el entrenador o por
+   * CLI). El front lo usa para empujar al usuario a cambiarla. No puede vivir
+   * en el navegador: sería por dispositivo y no por cuenta.
+   */
+  mustChangePassword: boolean;
 }
 
 /** `LoginResponse` del contrato. */

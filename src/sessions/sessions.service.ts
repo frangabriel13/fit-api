@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -10,7 +11,7 @@ import { dayKey } from '../common/day-key';
 import { PaginationQueryDto, paginar } from '../common/dto/pagination.dto';
 import { patchData } from '../common/patch';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateSessionDto } from './dto/session.dto';
+import { CreateSessionDto, UpdateSessionDto } from './dto/session.dto';
 import {
   SetLogPatchDto,
   SetLogUpsertDto,
@@ -62,6 +63,65 @@ export class SessionsService {
       include: SESSION_INCLUDE,
     });
     return toSessionDto(session);
+  }
+
+  /**
+   * Cierra o reabre la sesión, y edita sus notas.
+   *
+   * El cierre es idempotente a propósito: cerrar una sesión ya cerrada
+   * conserva la hora del primer cierre. Si la pisara, un doble clic movería el
+   * dato sin que nadie se entere.
+   */
+  async update(
+    user: UserDto,
+    sessionId: string,
+    dto: UpdateSessionDto,
+  ): Promise<WorkoutSessionDto> {
+    await this.access.assertSession(user, sessionId);
+    const { completed, ...resto } = dto;
+
+    const actual = await this.prisma.workoutSession.findUniqueOrThrow({
+      where: { id: sessionId },
+      select: { completedAt: true },
+    });
+
+    const cierre =
+      completed === undefined
+        ? {}
+        : {
+            completedAt: completed ? (actual.completedAt ?? new Date()) : null,
+          };
+
+    const session = await this.prisma.workoutSession.update({
+      where: { id: sessionId },
+      data: { ...patchData(resto), ...cierre },
+      include: SESSION_INCLUDE,
+    });
+    return toSessionDto(session);
+  }
+
+  /**
+   * Descarta una sesión abierta.
+   *
+   * Solo mientras siga abierta: una sesión cerrada es historial y borrarla se
+   * llevaría sus series por la cascada. Esto existe para el caso real de
+   * "abrí la pantalla sin querer y me quedó el día empezado", no para editar
+   * el pasado.
+   */
+  async remove(user: UserDto, sessionId: string): Promise<void> {
+    await this.access.assertSession(user, sessionId);
+
+    const { completedAt } = await this.prisma.workoutSession.findUniqueOrThrow({
+      where: { id: sessionId },
+      select: { completedAt: true },
+    });
+    if (completedAt) {
+      throw new ConflictException(
+        'La sesión ya está cerrada: es historial y no se borra',
+      );
+    }
+
+    await this.prisma.workoutSession.delete({ where: { id: sessionId } });
   }
 
   /**
