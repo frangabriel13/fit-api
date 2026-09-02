@@ -101,8 +101,17 @@ async function main(): Promise<void> {
       password: await argon2.hash(password, { type: argon2.argon2id }),
       role: args.role,
       trainerId,
+      // Si la contraseña la generamos nosotros, es provisoria y el front tiene
+      // que empujar a cambiarla. Si la eligió quien corre el comando, no.
+      mustChangePassword: args.password === undefined,
     },
-    select: { id: true, email: true, name: true, role: true },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      role: true,
+      mustChangePassword: true,
+    },
   });
 
   console.log(`\nUsuario creado:\n`, user);

@@ -18,6 +18,7 @@ export const toSetLogDto = (l: SetLog): SetLogDto => ({
 export const toSessionDto = (s: SessionWithLogs): WorkoutSessionDto => ({
   id: s.id,
   dayId: s.dayId,
+  completedAt: s.completedAt?.toISOString() ?? null,
   // `.toISOString()` sale en UTC con `Z`: el contrato pide zona explícita.
   performedAt: s.performedAt.toISOString(),
   notes: s.notes,

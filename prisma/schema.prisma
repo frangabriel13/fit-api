@@ -24,6 +24,15 @@ model User {
   role      UserRole @default(client)
   createdAt DateTime @default(now())
 
+  /// Baja lógica: borrar de verdad se lleva puestas sus sesiones y sus
+  /// asignaciones por la cascada de FKs. Se marca, se filtra en la cartera y
+  /// bloquea el login.
+  deletedAt DateTime?
+
+  /// La contraseña la eligió otro (alta por el entrenador, o generada por CLI).
+  /// El front lo usa para empujar al usuario a cambiarla.
+  mustChangePassword Boolean @default(false)
+
   // Cartera: un cliente pertenece a un entrenador.
   trainerId String?
   trainer   User?   @relation("TrainerClients", fields: [trainerId], references: [id])
@@ -137,6 +146,11 @@ model WorkoutSession {
   id          String   @id @default(uuid())
   performedAt DateTime @default(now())
   notes       String?
+
+  /// Sesión cerrada. Mientras sea null la sesión sigue abierta: el historial
+  /// de progreso no la toma como semana registrada y el front sabe que lo que
+  /// ve es parcial.
+  completedAt DateTime?
 
   dayId String
   day   Day    @relation(fields: [dayId], references: [id], onDelete: Cascade)

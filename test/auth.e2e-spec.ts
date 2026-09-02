@@ -64,6 +64,7 @@ describe('Auth y códigos de error (e2e)', () => {
         email: TRAINER.email,
         name: expect.any(String) as unknown,
         role: 'trainer',
+        mustChangePassword: expect.any(Boolean) as unknown,
       });
       expect(body.user).not.toHaveProperty('password');
     });
@@ -112,6 +113,9 @@ describe('Auth y códigos de error (e2e)', () => {
       expect(Object.keys(res.body as UserDto).sort()).toEqual([
         'email',
         'id',
+        // EXTENSIÓN: sin esto el front no sabe que la contraseña es la
+        // provisoria que le puso el entrenador.
+        'mustChangePassword',
         'name',
         'role',
       ]);

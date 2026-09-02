@@ -1,4 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 
 import { UserDto } from '../auth/auth.types';
@@ -71,7 +75,10 @@ export class SplitsService {
 
   async create(user: UserDto, dto: CreateSplitDto): Promise<SplitDto> {
     const { clientId, ...data } = dto;
-    if (clientId) await this.access.assertIsMyClient(user, clientId);
+    if (clientId) {
+      await this.access.assertIsMyClient(user, clientId);
+      await this.assertSinRutina(clientId);
+    }
 
     const split = await this.prisma.split.create({
       data: {
@@ -95,7 +102,10 @@ export class SplitsService {
   ): Promise<SplitDto> {
     await this.access.assertSplit(user, id, 'write');
     const { clientId, ...rest } = dto;
-    if (clientId) await this.access.assertIsMyClient(user, clientId);
+    if (clientId) {
+      await this.access.assertIsMyClient(user, clientId);
+      await this.assertSinRutina(clientId, id);
+    }
 
     const split = await this.prisma.split.update({
       where: { id },
@@ -116,6 +126,64 @@ export class SplitsService {
       include: SPLIT_TREE_INCLUDE,
     });
     return toSplitDto(split);
+  }
+
+  /**
+   * Desasigna la rutina de un cliente.
+   *
+   * La asignación se desactiva en vez de borrarse: queda registro de que esa
+   * persona entrenó con esta rutina, que es lo que le da sentido a sus
+   * sesiones viejas. Volver a asignarla la reactiva.
+   */
+  async unassign(
+    user: UserDto,
+    splitId: string,
+    clientId: string,
+  ): Promise<void> {
+    await this.access.assertSplit(user, splitId, 'write');
+    await this.access.assertIsMyClient(user, clientId);
+
+    const { count } = await this.prisma.splitAssignment.updateMany({
+      where: { splitId, clientId, isActive: true },
+      data: { isActive: false },
+    });
+    if (count === 0) {
+      throw new NotFoundException('Ese cliente no tiene asignada esta rutina');
+    }
+  }
+
+  /**
+   * Un cliente tiene UNA rutina activa: es la regla de producto que el
+   * frontend ya asume (toma la primera de la lista).
+   *
+   * Sin este chequeo, asignarle una segunda no fallaba y la rutina con la que
+   * venía entrenando simplemente dejaba de verse —seguía en la base, pero sin
+   * ningún camino para recuperarla desde la app—. Preferimos el 409 antes que
+   * desasignar sola la anterior: cambiarle la rutina a alguien tiene que ser
+   * un acto explícito, no el efecto secundario de un clic.
+   *
+   * Las rutinas borradas no cuentan: no bloquean una asignación nueva.
+   */
+  private async assertSinRutina(
+    clientId: string,
+    exceptoSplitId?: string,
+  ): Promise<void> {
+    const otra = await this.prisma.splitAssignment.findFirst({
+      where: {
+        clientId,
+        isActive: true,
+        split: VIVO,
+        ...(exceptoSplitId ? { splitId: { not: exceptoSplitId } } : {}),
+      },
+      select: { splitId: true, split: { select: { name: true } } },
+    });
+
+    if (otra) {
+      throw new ConflictException(
+        `Ese cliente ya tiene una rutina asignada ("${otra.split.name}"). ` +
+          `Desasignala primero: DELETE /splits/${otra.splitId}/assignments/${clientId}`,
+      );
+    }
   }
 
   /** Borrado lógico: ver `soft-delete.ts` para el porqué. */

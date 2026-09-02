@@ -4,9 +4,14 @@ import request from 'supertest';
 import type { App } from 'supertest/types';
 
 import { AppModule } from '../src/app.module';
-import type { LoginResponseDto, UserDto } from '../src/auth/auth.types';
+import type { LoginResponseDto } from '../src/auth/auth.types';
 import { buildValidationPipe } from '../src/common/validation';
-import { purgarSplits } from './helpers';
+import {
+  crearClienteDePrueba,
+  PREFIJO_CLIENTE,
+  purgarSplits,
+  purgarUsuariosDePrueba,
+} from './helpers';
 import type {
   DayDto,
   DayExerciseDto,
@@ -27,7 +32,6 @@ const TRAINER = {
   email: 'mansilla.franco.1@gmail.com',
   password: 'fitdev1234',
 };
-const CLIENT = { email: 'diamela@fitness.com', password: 'fitdev1234' };
 
 describe('Soft delete: el historial sobrevive (e2e)', () => {
   let app: INestApplication<App>;
@@ -56,14 +60,11 @@ describe('Soft delete: el historial sobrevive (e2e)', () => {
       ).accessToken;
 
     trainer = await login(TRAINER);
-    client = await login(CLIENT);
-    clientId = (
-      (await request(http).get('/clients').set(auth(trainer))).body as UserDto[]
-    )[0].id;
   });
 
   afterAll(async () => {
     await purgarSplits(app, splitsCreados);
+    await purgarUsuariosDePrueba(app, PREFIJO_CLIENTE);
     await app.close();
   });
 
@@ -72,6 +73,15 @@ describe('Soft delete: el historial sobrevive (e2e)', () => {
    * con dos ejercicios, y una sesión con series registradas en ambos.
    */
   const escenarioEntrenado = async () => {
+    // Un cliente descartable por escenario: solo pueden tener una rutina.
+    const cliente = await crearClienteDePrueba(
+      http,
+      trainer,
+      'Cliente soft delete',
+    );
+    client = cliente.token;
+    clientId = cliente.id;
+
     const split = (
       await request(http)
         .post('/splits')

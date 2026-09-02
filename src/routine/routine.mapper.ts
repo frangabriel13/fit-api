@@ -9,7 +9,10 @@ import {
 
 type DayWithExercises = Day & { exercises: DayExercise[] };
 type MicrocycleWithDays = Microcycle & { days: DayWithExercises[] };
-type SplitWithTree = Split & { microcycles: MicrocycleWithDays[] };
+type SplitWithTree = Split & {
+  microcycles: MicrocycleWithDays[];
+  assignments: { client: { id: string; name: string } }[];
+};
 
 export const toDayExerciseDto = (e: DayExercise): DayExerciseDto => ({
   id: e.id,
@@ -49,6 +52,7 @@ export const toSplitDto = (s: SplitWithTree): SplitDto => ({
   name: s.name,
   description: s.description,
   microcycles: s.microcycles.map(toMicrocycleDto),
+  clients: s.assignments.map((a) => a.client),
 });
 
 /** Filtro de soft delete: lo borrado no se lee. */
@@ -60,6 +64,13 @@ export const VIVO = { deletedAt: null } as const;
  * ejercicios a la respuesta.
  */
 export const SPLIT_TREE_INCLUDE = {
+  // Sin esto el editor puede asignar una rutina pero no mostrar a quién se la
+  // asignó. Un cliente dado de baja no cuenta: su asignación no se muestra.
+  assignments: {
+    where: { isActive: true, client: { deletedAt: null } },
+    select: { client: { select: { id: true, name: true } } },
+    orderBy: { assignedAt: 'asc' },
+  },
   microcycles: {
     where: VIVO,
     orderBy: { order: 'asc' },

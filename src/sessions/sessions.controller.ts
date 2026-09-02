@@ -14,7 +14,12 @@ import {
 
 import type { UserDto } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { CreateSessionDto, ListSessionsQueryDto } from './dto/session.dto';
+import { targetUserId } from '../common/dto/target-user.dto';
+import {
+  CreateSessionDto,
+  ListSessionsQueryDto,
+  UpdateSessionDto,
+} from './dto/session.dto';
 import { SetLogPatchDto, UpsertSetLogsDto } from './dto/set-log.dto';
 import { SessionsService } from './sessions.service';
 import type { SetLogDto, WorkoutSessionDto } from './sessions.types';
@@ -29,7 +34,7 @@ export class SessionsController {
     @Param('dayId', ParseUUIDPipe) dayId: string,
     @Query() query: ListSessionsQueryDto,
   ): Promise<WorkoutSessionDto[]> {
-    return this.sessions.findByDay(user, dayId, query.userId, query);
+    return this.sessions.findByDay(user, dayId, targetUserId(query), query);
   }
 
   @Get('sessions/:id')
@@ -48,6 +53,29 @@ export class SessionsController {
     @Body() dto: CreateSessionDto,
   ): Promise<WorkoutSessionDto> {
     return this.sessions.createForDay(user, dayId, dto);
+  }
+
+  /** EXTENSIÓN: cerrar la sesión (`completed`) y editar sus notas. */
+  @Patch('sessions/:id')
+  update(
+    @CurrentUser() user: UserDto,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateSessionDto,
+  ): Promise<WorkoutSessionDto> {
+    return this.sessions.update(user, id, dto);
+  }
+
+  /**
+   * EXTENSIÓN: descartar una sesión abierta por error. Una sesión ya cerrada
+   * es historial y responde 409.
+   */
+  @Delete('sessions/:id')
+  @HttpCode(204)
+  remove(
+    @CurrentUser() user: UserDto,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<void> {
+    return this.sessions.remove(user, id);
   }
 
   /** Upsert en lote. Devuelve la sesión completa con todos sus set-logs. */

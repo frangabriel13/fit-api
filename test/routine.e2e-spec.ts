@@ -6,7 +6,12 @@ import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import type { LoginResponseDto, UserDto } from '../src/auth/auth.types';
 import { buildValidationPipe } from '../src/common/validation';
-import { purgarSplits } from './helpers';
+import {
+  crearClienteDePrueba,
+  PREFIJO_CLIENTE,
+  purgarSplits,
+  purgarUsuariosDePrueba,
+} from './helpers';
 import type {
   DayDto,
   DayExerciseDto,
@@ -36,6 +41,7 @@ describe('Árbol de rutinas (e2e)', () => {
   let client: string;
   let ajeno: string;
   let clientId: string;
+  let clienteToken: string;
   const creados: string[] = [];
 
   const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
@@ -60,14 +66,16 @@ describe('Árbol de rutinas (e2e)', () => {
     client = await login(CLIENT);
     ajeno = await login(AJENO);
 
-    const clients = (await request(http).get('/clients').set(auth(trainer)))
-      .body as UserDto[];
-    clientId = clients[0].id;
+    // Cliente descartable: al del seed ya no se le puede asignar otra rutina.
+    const propio = await crearClienteDePrueba(http, trainer, 'Cliente rutina');
+    clientId = propio.id;
+    clienteToken = propio.token;
   });
 
   afterAll(async () => {
     // El DELETE de la API es lógico, así que la limpieza va por debajo.
     await purgarSplits(app, creados);
+    await purgarUsuariosDePrueba(app, PREFIJO_CLIENTE);
     await app.close();
   });
 
@@ -100,6 +108,9 @@ describe('Árbol de rutinas (e2e)', () => {
 
       expect(splits.length).toBeGreaterThan(0);
       expect(Object.keys(splits[0]).sort()).toEqual([
+        // `clients` es extensión: sin ella el editor asigna pero no puede
+        // mostrar a quién.
+        'clients',
         'description',
         'id',
         'microcycles',
@@ -205,9 +216,11 @@ describe('Árbol de rutinas (e2e)', () => {
     it('el trainer crea y puede asignar al cliente en el mismo paso', async () => {
       const split = await crearSplit({ clientId });
 
-      const delCliente = (await request(http).get('/splits').set(auth(client)))
-        .body as SplitDto[];
+      const delCliente = (
+        await request(http).get('/splits').set(auth(clienteToken))
+      ).body as SplitDto[];
       expect(delCliente.map((s) => s.id)).toContain(split.id);
+      expect(split.clients.map((c) => c.id)).toEqual([clientId]);
     });
 
     it('nombre vacío -> 400', () =>

@@ -6,7 +6,12 @@ import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import type { LoginResponseDto, UserDto } from '../src/auth/auth.types';
 import { buildValidationPipe } from '../src/common/validation';
-import { purgarSplits } from './helpers';
+import {
+  crearClienteDePrueba,
+  PREFIJO_CLIENTE,
+  purgarSplits,
+  purgarUsuariosDePrueba,
+} from './helpers';
 import type {
   DayDto,
   DayExerciseDto,
@@ -28,7 +33,6 @@ const TRAINER = {
   email: 'mansilla.franco.1@gmail.com',
   password: 'fitdev1234',
 };
-const CLIENT = { email: 'diamela@fitness.com', password: 'fitdev1234' };
 const AJENO = { email: 'user1@fitback.dev', password: 'fitdev1234' };
 
 const UUID_INEXISTENTE = '00000000-0000-4000-8000-000000000000';
@@ -139,12 +143,17 @@ describe('Sesiones y set-logs (e2e)', () => {
       ).accessToken;
 
     trainer = await login(TRAINER);
-    client = await login(CLIENT);
     ajeno = await login(AJENO);
 
-    clientId = (
-      (await request(http).get('/clients').set(auth(trainer))).body as UserDto[]
-    )[0].id;
+    // Cliente propio del suite: la del seed ya tiene rutina y asignarle otra
+    // ahora responde 409.
+    const cliente = await crearClienteDePrueba(
+      http,
+      trainer,
+      'Cliente sesiones',
+    );
+    client = cliente.token;
+    clientId = cliente.id;
 
     // Split propio para estos tests, asignado al cliente.
     splitId = (
@@ -191,6 +200,7 @@ describe('Sesiones y set-logs (e2e)', () => {
   afterAll(async () => {
     // La cascada se lleva días, ejercicios, sesiones y set-logs.
     await purgarSplits(app, [splitId]);
+    await purgarUsuariosDePrueba(app, PREFIJO_CLIENTE);
     await app.close();
   });
 
@@ -199,6 +209,8 @@ describe('Sesiones y set-logs (e2e)', () => {
       const session = await nuevaSesion();
 
       expect(Object.keys(session).sort()).toEqual([
+        // `completedAt` es extensión: null mientras la sesión sigue abierta.
+        'completedAt',
         'dayId',
         'id',
         'notes',
@@ -206,6 +218,7 @@ describe('Sesiones y set-logs (e2e)', () => {
         'setLogs',
       ]);
       expect(session.dayId).toBe(dayId);
+      expect(session.completedAt).toBeNull();
       expect(session.setLogs).toEqual([]);
     });
 
@@ -578,6 +591,24 @@ describe('Sesiones y set-logs (e2e)', () => {
       expect((res.body as WorkoutSessionDto[]).length).toBeGreaterThan(0);
     });
 
+    it('acepta `clientId` como alias de `userId`, en vez de ignorarlo', async () => {
+      const porUserId = await request(http)
+        .get(`/days/${dayId}/sessions?userId=${clientId}`)
+        .set(auth(trainer))
+        .expect(200);
+      const porClientId = await request(http)
+        .get(`/days/${dayId}/sessions?clientId=${clientId}`)
+        .set(auth(trainer))
+        .expect(200);
+
+      // Antes `clientId` se descartaba en silencio y devolvía las del
+      // entrenador: 200 con los datos de otra persona y ningún aviso.
+      expect(porClientId.body).toEqual(porUserId.body);
+      expect((porClientId.body as WorkoutSessionDto[]).length).toBeGreaterThan(
+        0,
+      );
+    });
+
     it('mirar el historial de alguien ajeno -> 403', async () => {
       const otro = (
         (await request(http).get('/auth/me').set(auth(ajeno))).body as UserDto
@@ -597,6 +628,265 @@ describe('Sesiones y set-logs (e2e)', () => {
         .set(auth(client))
         .expect(404);
       await request(http).get(`/sessions/${id}`).expect(401);
+    });
+  });
+  describe('PATCH /sessions/:id — cerrar la sesión', () => {
+    it('nace abierta: completedAt es null', async () => {
+      const { session } = await contextoLimpio();
+      expect(session.completedAt).toBeNull();
+    });
+
+    it('completed: true la cierra con la hora del server', async () => {
+      const { session } = await contextoLimpio();
+
+      const res = await request(http)
+        .patch(`/sessions/${session.id}`)
+        .set(auth(client))
+        .send({ completed: true })
+        .expect(200);
+
+      const cerrada = res.body as WorkoutSessionDto;
+      expect(cerrada.completedAt).toEqual(expect.any(String) as unknown);
+      expect(new Date(cerrada.completedAt as string).getTime()).not.toBeNaN();
+    });
+
+    it('cerrarla dos veces conserva la hora del primer cierre', async () => {
+      const { session } = await contextoLimpio();
+
+      const primera = (
+        await request(http)
+          .patch(`/sessions/${session.id}`)
+          .set(auth(client))
+          .send({ completed: true })
+          .expect(200)
+      ).body as WorkoutSessionDto;
+
+      const segunda = (
+        await request(http)
+          .patch(`/sessions/${session.id}`)
+          .set(auth(client))
+          .send({ completed: true })
+          .expect(200)
+      ).body as WorkoutSessionDto;
+
+      expect(segunda.completedAt).toBe(primera.completedAt);
+    });
+
+    it('completed: false la reabre', async () => {
+      const { session } = await contextoLimpio();
+
+      await request(http)
+        .patch(`/sessions/${session.id}`)
+        .set(auth(client))
+        .send({ completed: true })
+        .expect(200);
+
+      const reabierta = (
+        await request(http)
+          .patch(`/sessions/${session.id}`)
+          .set(auth(client))
+          .send({ completed: false })
+          .expect(200)
+      ).body as WorkoutSessionDto;
+
+      expect(reabierta.completedAt).toBeNull();
+    });
+
+    it('edita las notas sin tocar el cierre', async () => {
+      const { session } = await contextoLimpio();
+      await request(http)
+        .patch(`/sessions/${session.id}`)
+        .set(auth(client))
+        .send({ completed: true })
+        .expect(200);
+
+      const res = await request(http)
+        .patch(`/sessions/${session.id}`)
+        .set(auth(client))
+        .send({ notes: 'Pesada la última serie' })
+        .expect(200);
+
+      const s = res.body as WorkoutSessionDto;
+      expect(s.notes).toBe('Pesada la última serie');
+      expect(s.completedAt).not.toBeNull();
+    });
+
+    it('el cierre sobrevive a un PUT de series posterior', async () => {
+      const { session, ex1: a, ex2: b } = await contextoLimpio();
+      await request(http)
+        .patch(`/sessions/${session.id}`)
+        .set(auth(client))
+        .send({ completed: true })
+        .expect(200);
+
+      const res = await request(http)
+        .put(`/sessions/${session.id}/set-logs`)
+        .set(auth(client))
+        .send({ setLogs: grilla(10, a, b) })
+        .expect(200);
+
+      expect((res.body as WorkoutSessionDto).completedAt).not.toBeNull();
+    });
+
+    it('completed no booleano -> 400', async () => {
+      const { session } = await contextoLimpio();
+      await request(http)
+        .patch(`/sessions/${session.id}`)
+        .set(auth(client))
+        .send({ completed: 'si' })
+        .expect(400);
+    });
+
+    it('sesión de otro -> 403, nunca 401; inexistente -> 404', async () => {
+      const { session } = await contextoLimpio();
+
+      await request(http)
+        .patch(`/sessions/${session.id}`)
+        .set(auth(ajeno))
+        .send({ completed: true })
+        .expect(403);
+
+      await request(http)
+        .patch(`/sessions/${UUID_INEXISTENTE}`)
+        .set(auth(client))
+        .send({ completed: true })
+        .expect(404);
+    });
+
+    it('el entrenador puede cerrar la sesión de su cliente', async () => {
+      const { session } = await contextoLimpio();
+
+      await request(http)
+        .patch(`/sessions/${session.id}`)
+        .set(auth(trainer))
+        .send({ completed: true })
+        .expect(200);
+    });
+  });
+
+  describe('DELETE /sessions/:id — descartar una sesión abierta', () => {
+    it('borra la sesión abierta y sus series', async () => {
+      const { dayId: d, session, ex1: a, ex2: b } = await contextoLimpio();
+      await request(http)
+        .put(`/sessions/${session.id}/set-logs`)
+        .set(auth(client))
+        .send({ setLogs: grilla(10, a, b) })
+        .expect(200);
+
+      await request(http)
+        .delete(`/sessions/${session.id}`)
+        .set(auth(client))
+        .expect(204);
+
+      await request(http)
+        .get(`/sessions/${session.id}`)
+        .set(auth(client))
+        .expect(404);
+
+      const delDia = (
+        await request(http)
+          .get(`/days/${d}/sessions`)
+          .set(auth(client))
+          .expect(200)
+      ).body as WorkoutSessionDto[];
+      expect(delDia).toEqual([]);
+    });
+
+    it('una sesión ya cerrada es historial -> 409', async () => {
+      const { session } = await contextoLimpio();
+      await request(http)
+        .patch(`/sessions/${session.id}`)
+        .set(auth(client))
+        .send({ completed: true })
+        .expect(200);
+
+      const res = await request(http)
+        .delete(`/sessions/${session.id}`)
+        .set(auth(client))
+        .expect(409);
+      expect(typeof (res.body as { message: string }).message).toBe('string');
+    });
+
+    it('reabrirla vuelve a permitir borrarla', async () => {
+      const { session } = await contextoLimpio();
+      await request(http)
+        .patch(`/sessions/${session.id}`)
+        .set(auth(client))
+        .send({ completed: true })
+        .expect(200);
+      await request(http)
+        .patch(`/sessions/${session.id}`)
+        .set(auth(client))
+        .send({ completed: false })
+        .expect(200);
+
+      await request(http)
+        .delete(`/sessions/${session.id}`)
+        .set(auth(client))
+        .expect(204);
+    });
+
+    it('sesión de otro -> 403; inexistente -> 404; sin token -> 401', async () => {
+      const { session } = await contextoLimpio();
+
+      await request(http)
+        .delete(`/sessions/${session.id}`)
+        .set(auth(ajeno))
+        .expect(403);
+      await request(http)
+        .delete(`/sessions/${UUID_INEXISTENTE}`)
+        .set(auth(client))
+        .expect(404);
+      await request(http).delete(`/sessions/${session.id}`).expect(401);
+    });
+  });
+
+  describe('el 400 del upsert apunta al problema real', () => {
+    it('mandar el array pelado dice que falta el array, no que sobran series', async () => {
+      const { session } = await contextoLimpio();
+
+      const res = await request(http)
+        .put(`/sessions/${session.id}/set-logs`)
+        .set(auth(client))
+        .send([])
+        .expect(400);
+
+      const { message } = res.body as { message: string };
+      expect(message).toContain('array');
+      // El tope no tiene nada que ver con un body mal formado.
+      expect(message).not.toContain('demasiadas');
+    });
+
+    it('un lote grande pero válido pasa', async () => {
+      const { session, ex1: a } = await contextoLimpio();
+      const lote = Array.from({ length: 101 }, (_, i) => ({
+        dayExerciseId: a,
+        setNumber: i + 1,
+        completed: false,
+      }));
+
+      await request(http)
+        .put(`/sessions/${session.id}/set-logs`)
+        .set(auth(client))
+        .send({ setLogs: lote })
+        .expect(200);
+    });
+
+    it('pasado el tope -> 400 diciendo que son demasiadas', async () => {
+      const { session, ex1: a } = await contextoLimpio();
+      const lote = Array.from({ length: 501 }, (_, i) => ({
+        dayExerciseId: a,
+        setNumber: i + 1,
+        completed: false,
+      }));
+
+      const res = await request(http)
+        .put(`/sessions/${session.id}/set-logs`)
+        .set(auth(client))
+        .send({ setLogs: lote })
+        .expect(400);
+
+      expect((res.body as { message: string }).message).toContain('demasiadas');
     });
   });
 });
