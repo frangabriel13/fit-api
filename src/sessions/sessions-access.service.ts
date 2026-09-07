@@ -45,21 +45,15 @@ export class SessionsAccessService {
   }
 
   /**
-   * Valida que se pueda usar ese día: tiene que existir y la rutina que lo
-   * contiene tiene que ser accesible para el usuario.
+   * Valida que se pueda EMPEZAR una sesión en ese día: tiene que existir, no
+   * estar borrado, y la rutina que lo contiene tiene que ser accesible.
    *
-   * `incluirBorrados` distingue los dos usos: para LEER historial se aceptan
-   * días ya borrados de la rutina (si no, borrar un día escondería las
-   * sesiones que se entrenaron con él, que es lo que el soft delete vino a
-   * evitar); para EMPEZAR una sesión nueva, no.
+   * Para LEER historial no se usa esto sino `assertDayExists`: ahí está el
+   * porqué de la diferencia.
    */
-  async assertDay(
-    user: UserDto,
-    dayId: string,
-    { incluirBorrados = false }: { incluirBorrados?: boolean } = {},
-  ): Promise<void> {
+  async assertDay(user: UserDto, dayId: string): Promise<void> {
     const day = await this.prisma.day.findFirst({
-      where: { id: dayId, ...(incluirBorrados ? {} : { deletedAt: null }) },
+      where: { id: dayId, deletedAt: null },
       select: {
         microcycle: {
           select: {
@@ -99,6 +93,29 @@ export class SessionsAccessService {
     if (asignada) return;
 
     throw new ForbiddenException('Sin permiso para esta rutina');
+  }
+
+  /**
+   * Para LEER historial alcanza con que el día exista.
+   *
+   * Quién puede ver esas sesiones lo decide `assertCanSeeUser` —el dueño o su
+   * entrenador—, exactamente el mismo criterio que aplica `assertSession` en
+   * `GET /sessions/:id`. Antes esto exigía además acceso a la rutina, y esa
+   * condición de más tapaba el historial propio: al desasignar a un cliente
+   * (`isActive: false`) el listado le respondía 403 sobre sus propias
+   * sesiones mientras el detalle se las seguía dando. Desasignar conserva la
+   * asignación justamente para no perder ese historial, así que el 403
+   * contradecía su motivo de ser.
+   *
+   * No filtra por `deletedAt` a propósito: un día borrado de la rutina sigue
+   * teniendo historial que mostrar.
+   */
+  async assertDayExists(dayId: string): Promise<void> {
+    const day = await this.prisma.day.findUnique({
+      where: { id: dayId },
+      select: { id: true },
+    });
+    if (!day) throw new NotFoundException('Día no encontrado');
   }
 
   /** Un entrenador solo puede mirar el historial de su propia cartera. */
