@@ -4,7 +4,11 @@ import request from 'supertest';
 import type { App } from 'supertest/types';
 
 import { AppModule } from '../src/app.module';
-import type { LoginResponseDto, UserDto } from '../src/auth/auth.types';
+import type {
+  LoginResponseDto,
+  TokensDto,
+  UserDto,
+} from '../src/auth/auth.types';
 import { buildValidationPipe } from '../src/common/validation';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { purgarUsuariosDePrueba } from './helpers';
@@ -263,14 +267,25 @@ describe('Alta de usuarios (e2e)', () => {
       }).expect(400);
     });
 
-    it('con la actual correcta -> 204, y a partir de ahí vale la nueva', async () => {
+    it('con la actual correcta -> 200 con tokens nuevos, y vale la nueva', async () => {
       const { token, email, password } = await tokenNuevo();
       const nueva = 'nuevaClave456';
 
-      await cambiar(token, {
+      const res = await cambiar(token, {
         currentPassword: password,
         newPassword: nueva,
-      }).expect(204);
+      }).expect(200);
+
+      // Devuelve un par nuevo: el que cambió la contraseña sigue adentro.
+      const tokens = res.body as TokensDto;
+      expect(Object.keys(tokens).sort()).toEqual([
+        'accessToken',
+        'refreshToken',
+      ]);
+      await request(http)
+        .get('/auth/me')
+        .set(auth(tokens.accessToken))
+        .expect(200);
 
       await login({ email, password }).expect(401);
       await login({ email, password: nueva }).expect(200);
@@ -320,7 +335,7 @@ describe('Alta de usuarios (e2e)', () => {
         .post('/auth/change-password')
         .set(auth(suToken))
         .send({ currentPassword: PASSWORD, newPassword: 'elegidaporel123' })
-        .expect(204);
+        .expect(200);
 
       const res = await request(http)
         .patch(`/clients/${user.id}`)
@@ -462,7 +477,7 @@ describe('Alta de usuarios (e2e)', () => {
         .post('/auth/change-password')
         .set(auth(antes.accessToken))
         .send({ currentPassword: PASSWORD, newPassword: 'yalaelegi1234' })
-        .expect(204);
+        .expect(200);
 
       const despues = (
         await login({ email, password: 'yalaelegi1234' }).expect(200)

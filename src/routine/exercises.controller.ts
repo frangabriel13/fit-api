@@ -7,6 +7,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
 } from '@nestjs/common';
 
 import type { UserDto } from '../auth/auth.types';
@@ -15,6 +16,7 @@ import {
   CreateDayExerciseDto,
   UpdateDayExerciseDto,
 } from './dto/day-exercise.dto';
+import { ReorderDto } from './dto/reorder.dto';
 import { ExercisesService } from './exercises.service';
 import type { DayExerciseDto } from './routine.types';
 
@@ -33,6 +35,20 @@ export class ExercisesController {
     @Body() dto: CreateDayExerciseDto,
   ): Promise<DayExerciseDto> {
     return this.exercises.create(user, dayId, dto);
+  }
+
+  /**
+   * EXTENSIÓN: reorden en bloque. `ids` es la lista completa de hermanos
+   * vivos en el orden deseado, y se aplica en una transacción. Reemplaza a
+   * los N `PATCH { order }` sueltos, que podían quedar a medio aplicar.
+   */
+  @Put('days/:dayId/exercises/order')
+  reorder(
+    @CurrentUser() user: UserDto,
+    @Param('dayId', ParseUUIDPipe) dayId: string,
+    @Body() dto: ReorderDto,
+  ): Promise<DayExerciseDto[]> {
+    return this.exercises.reorder(user, dayId, dto.ids);
   }
 
   @Patch('exercises/:id')

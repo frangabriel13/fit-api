@@ -8,7 +8,8 @@ import {
   UpdateDayExerciseDto,
 } from './dto/day-exercise.dto';
 import { RoutineAccessService } from './routine-access.service';
-import { toDayExerciseDto } from './routine.mapper';
+import { aplicarReorden, conOrdenUnico } from './reorder';
+import { VIVO, toDayExerciseDto } from './routine.mapper';
 import { softDeleteExercise } from './soft-delete';
 import { DayExerciseDto } from './routine.types';
 
@@ -47,22 +48,24 @@ export class ExercisesService {
     await this.access.assertDay(user, dayId, 'write');
     const rir = this.rirRange(dto);
 
-    const exercise = await this.prisma.dayExercise.create({
-      data: {
-        dayId,
-        name: dto.name,
-        order: dto.order,
-        targetSets: dto.targetSets,
-        targetRestSeconds: dto.targetRestSeconds ?? null,
-        notes: dto.notes ?? null,
-        targetRepsMin: dto.targetRepsMin ?? null,
-        targetRepsMax: dto.targetRepsMax ?? null,
-        targetRirMin: rir.targetRirMin ?? null,
-        targetRirMax: rir.targetRirMax ?? null,
-        toFailure: dto.toFailure ?? false,
-        supersetGroup: dto.supersetGroup ?? null,
-      },
-    });
+    const exercise = await conOrdenUnico(() =>
+      this.prisma.dayExercise.create({
+        data: {
+          dayId,
+          name: dto.name,
+          order: dto.order,
+          targetSets: dto.targetSets,
+          targetRestSeconds: dto.targetRestSeconds ?? null,
+          notes: dto.notes ?? null,
+          targetRepsMin: dto.targetRepsMin ?? null,
+          targetRepsMax: dto.targetRepsMax ?? null,
+          targetRirMin: rir.targetRirMin ?? null,
+          targetRirMax: rir.targetRirMax ?? null,
+          toFailure: dto.toFailure ?? false,
+          supersetGroup: dto.supersetGroup ?? null,
+        },
+      }),
+    );
     return toDayExerciseDto(exercise);
   }
 
@@ -77,11 +80,38 @@ export class ExercisesService {
     const { targetRir, ...rest } = dto;
     void targetRir;
 
-    const exercise = await this.prisma.dayExercise.update({
-      where: { id },
-      data: patchData({ ...rest, ...this.rirRange(dto) }),
-    });
+    const exercise = await conOrdenUnico(() =>
+      this.prisma.dayExercise.update({
+        where: { id },
+        data: patchData({ ...rest, ...this.rirRange(dto) }),
+      }),
+    );
     return toDayExerciseDto(exercise);
+  }
+
+  /** Reorden en bloque de los ejercicios de un día. Ver `reorder.ts`. */
+  async reorder(
+    user: UserDto,
+    dayId: string,
+    ids: string[],
+  ): Promise<DayExerciseDto[]> {
+    await this.access.assertDay(user, dayId, 'write');
+
+    await this.prisma.$transaction(async (tx) => {
+      const actuales = await tx.dayExercise.findMany({
+        where: { dayId, ...VIVO },
+        select: { id: true, order: true },
+      });
+      await aplicarReorden(actuales, ids, (id, order) =>
+        tx.dayExercise.update({ where: { id }, data: { order } }),
+      );
+    });
+
+    const exercises = await this.prisma.dayExercise.findMany({
+      where: { dayId, ...VIVO },
+      orderBy: { order: 'asc' },
+    });
+    return exercises.map(toDayExerciseDto);
   }
 
   /** Lógico: si se borrara de verdad, se irían las series ya registradas. */

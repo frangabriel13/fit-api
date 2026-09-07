@@ -6,6 +6,7 @@ import { patchData } from '../common/patch';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateMicrocycleDto, UpdateMicrocycleDto } from './dto/microcycle.dto';
 import { RoutineAccessService } from './routine-access.service';
+import { aplicarReorden, conOrdenUnico } from './reorder';
 import { VIVO, toMicrocycleDto } from './routine.mapper';
 import { softDeleteMicrocycle } from './soft-delete';
 import { MicrocycleDto } from './routine.types';
@@ -31,10 +32,12 @@ export class MicrocyclesService {
     dto: CreateMicrocycleDto,
   ): Promise<MicrocycleDto> {
     await this.access.assertSplit(user, splitId, 'write');
-    const micro = await this.prisma.microcycle.create({
-      data: { ...dto, splitId },
-      include: WITH_DAYS,
-    });
+    const micro = await conOrdenUnico(() =>
+      this.prisma.microcycle.create({
+        data: { ...dto, splitId },
+        include: WITH_DAYS,
+      }),
+    );
     return toMicrocycleDto(micro);
   }
 
@@ -44,12 +47,40 @@ export class MicrocyclesService {
     dto: UpdateMicrocycleDto,
   ): Promise<MicrocycleDto> {
     await this.access.assertMicrocycle(user, id, 'write');
-    const micro = await this.prisma.microcycle.update({
-      where: { id },
-      data: patchData(dto),
+    const micro = await conOrdenUnico(() =>
+      this.prisma.microcycle.update({
+        where: { id },
+        data: patchData(dto),
+        include: WITH_DAYS,
+      }),
+    );
+    return toMicrocycleDto(micro);
+  }
+
+  /** Reorden en bloque de las semanas de una rutina. Ver `reorder.ts`. */
+  async reorder(
+    user: UserDto,
+    splitId: string,
+    ids: string[],
+  ): Promise<MicrocycleDto[]> {
+    await this.access.assertSplit(user, splitId, 'write');
+
+    await this.prisma.$transaction(async (tx) => {
+      const actuales = await tx.microcycle.findMany({
+        where: { splitId, ...VIVO },
+        select: { id: true, order: true },
+      });
+      await aplicarReorden(actuales, ids, (id, order) =>
+        tx.microcycle.update({ where: { id }, data: { order } }),
+      );
+    });
+
+    const micros = await this.prisma.microcycle.findMany({
+      where: { splitId, ...VIVO },
+      orderBy: { order: 'asc' },
       include: WITH_DAYS,
     });
-    return toMicrocycleDto(micro);
+    return micros.map(toMicrocycleDto);
   }
 
   async remove(user: UserDto, id: string): Promise<void> {

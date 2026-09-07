@@ -33,6 +33,20 @@ model User {
   /// El front lo usa para empujar al usuario a cambiarla.
   mustChangePassword Boolean @default(false)
 
+  /// Generación de los access tokens válidos. Cada JWT lleva la suya; subir
+  /// este número invalida de golpe a todos los emitidos antes, aunque no hayan
+  /// vencido, y es lo que le da efecto inmediato a cerrar todas las sesiones o
+  /// a cambiar la contraseña sobre un JWT stateless.
+  ///
+  /// Es un contador y no una fecha de corte a propósito: el `iat` del JWT viene
+  /// en SEGUNDOS, así que con una fecha un token emitido en el mismo segundo
+  /// que el corte queda del lado equivocado —justo el caso del token nuevo que
+  /// devuelve el cambio de contraseña—. Con un entero no hay ventana.
+  ///
+  /// Se compara en `JwtStrategy`, que ya relee al usuario en cada request, así
+  /// que el chequeo no cuesta una query extra.
+  tokenVersion Int @default(0)
+
   // Cartera: un cliente pertenece a un entrenador.
   trainerId String?
   trainer   User?   @relation("TrainerClients", fields: [trainerId], references: [id])
@@ -42,6 +56,34 @@ model User {
   assignmentsAsClient  SplitAssignment[] @relation("AssignmentClient")
   assignmentsAsTrainer SplitAssignment[] @relation("AssignmentTrainer")
   sessions             WorkoutSession[]
+  refreshTokens        RefreshToken[]
+}
+
+/// Sesión de larga duración de un dispositivo.
+///
+/// El access token es stateless y corto; este es el que se guarda y permite
+/// pedir uno nuevo sin volver a tipear la contraseña. Al usarse se ROTA: el
+/// viejo queda revocado apuntando al que lo reemplazó, así que si alguien
+/// reusa uno ya gastado se detecta y se cierran todas las sesiones del usuario.
+model RefreshToken {
+  id String @id @default(uuid())
+
+  /// SHA-256 en hex. El valor en claro lo tiene solo el cliente: si se filtra
+  /// la base, estos hashes no sirven para entrar.
+  tokenHash String @unique
+
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  revokedAt DateTime?
+
+  /// El token que reemplazó a este al rotar. Que exista y además llegue un uso
+  /// del viejo es la señal de reuso.
+  replacedById String?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model Split {
@@ -85,6 +127,9 @@ model SplitAssignment {
 model Microcycle {
   id    String @id @default(uuid())
   name  String
+  /// `order` es único entre hermanos VIVOS, pero el índice no se ve acá: es
+  /// parcial (`WHERE "deletedAt" IS NULL`) y Prisma no sabe expresarlo. Vive
+  /// en la migración `20260907143000_unicidad_de_order`.
   order Int
 
   /// Soft delete: borrar de verdad se lleva puesto el historial de series por
@@ -100,6 +145,9 @@ model Microcycle {
 model Day {
   id    String  @id @default(uuid())
   name  String
+  /// `order` es único entre hermanos VIVOS, pero el índice no se ve acá: es
+  /// parcial (`WHERE "deletedAt" IS NULL`) y Prisma no sabe expresarlo. Vive
+  /// en la migración `20260907143000_unicidad_de_order`.
   order Int
   focus String?
 
@@ -117,6 +165,9 @@ model Day {
 model DayExercise {
   id                String  @id @default(uuid())
   name              String
+  /// `order` es único entre hermanos VIVOS, pero el índice no se ve acá: es
+  /// parcial (`WHERE "deletedAt" IS NULL`) y Prisma no sabe expresarlo. Vive
+  /// en la migración `20260907143000_unicidad_de_order`.
   order             Int
   targetSets        Int
   targetRestSeconds Int?
