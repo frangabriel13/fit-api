@@ -1,4 +1,7 @@
 import { Body, Controller, Get, HttpCode, Post } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
+
+import { THROTTLE_AUTH } from '../common/throttle';
 
 import { AuthService } from './auth.service';
 import type { LoginResponseDto, TokensDto, UserDto } from './auth.types';
@@ -13,6 +16,7 @@ export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
   /** Credenciales inválidas → 401 (lo pide el contrato). */
+  @Throttle(THROTTLE_AUTH)
   @Public()
   @Post('login')
   @HttpCode(200)
@@ -27,6 +31,7 @@ export class AuthController {
    * Rota: el token usado queda revocado. Reusar uno ya gastado cierra todas las
    * sesiones del usuario, porque es la señal de que alguien copió la cadena.
    */
+  @Throttle(THROTTLE_AUTH)
   @Public()
   @Post('refresh')
   @HttpCode(200)

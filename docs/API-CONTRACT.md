@@ -152,6 +152,23 @@ busca el día dentro de esa estructura, no hace una llamada aparte.
 | `DELETE` | `/exercises/:id` | — | — |
 | `PUT` | `/days/:dayId/exercises/order` | `{ ids: string[] }` | `DayExercise[]` |
 
+**Renombrar y el historial:**
+
+- ⚠️ **El historial de progreso se agrupa por NOMBRE de ejercicio**, no por id:
+  `GET /splits/:id/progress` devuelve una entrada por nombre, y el front la
+  busca como `history[ex.name]`. Un mesociclo repite los mismos ejercicios en
+  cada semana, así que la serie histórica se sostiene sobre que el nombre sea
+  idéntico en todas.
+- Por eso `PATCH /exercises/:id` acepta **`applyToAll: true`**: renombra todas
+  las apariciones de ese mismo nombre **dentro de la misma rutina**, que es el
+  alcance exacto con el que agrupa el progreso. Sin esto, corregir un typo en
+  una sola semana parte el historial en dos entradas y nadie se entera.
+- Es **opt-in a propósito**: cambiar una sola semana también es legítimo —en una
+  progresión la semana 3 puede pasar a sentadilla frontal—, y propagar siempre
+  haría imposible expresarlo.
+- Solo se propaga el `name`. El resto de los campos del PATCH se aplican
+  únicamente al ejercicio pedido.
+
 **Reorden y unicidad de `order`:**
 
 - **`order` es único entre hermanos vivos.** Crear o mover algo a un `order` ya

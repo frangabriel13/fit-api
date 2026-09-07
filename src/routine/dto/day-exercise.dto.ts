@@ -73,6 +73,18 @@ export class CreateDayExerciseDto {
   @IsString()
   @MaxLength(50)
   supersetGroup?: string | null;
+
+  /**
+   * EXTENSIÓN: renombrar también las demás apariciones de este ejercicio en la
+   * misma rutina. Solo tiene efecto junto con `name`.
+   *
+   * Existe porque el historial de progreso se agrupa POR NOMBRE: renombrar el
+   * ejercicio en una sola semana parte la serie histórica en dos y nadie se
+   * entera. No es automático a propósito — ver `ExercisesService.update`.
+   */
+  @IsOptional()
+  @IsBoolean()
+  applyToAll?: boolean;
 }
 
 export class UpdateDayExerciseDto {
@@ -134,4 +146,16 @@ export class UpdateDayExerciseDto {
   @IsString()
   @MaxLength(50)
   supersetGroup?: string | null;
+
+  /**
+   * EXTENSIÓN: renombrar también las demás apariciones de este ejercicio en la
+   * misma rutina. Solo tiene efecto junto con `name`.
+   *
+   * Existe porque el historial de progreso se agrupa POR NOMBRE: renombrar el
+   * ejercicio en una sola semana parte la serie histórica en dos y nadie se
+   * entera. No es automático a propósito — ver `ExercisesService.update`.
+   */
+  @IsOptional()
+  @IsBoolean()
+  applyToAll?: boolean;
 }
