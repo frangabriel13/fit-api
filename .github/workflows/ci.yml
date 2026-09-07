@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+# Un push encima de otro cancela la corrida vieja: no tiene sentido esperar el
+# resultado de un commit que ya quedó atrás.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verificar:
+    name: Lint, tipos, build y e2e
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: fitback
+          POSTGRES_USER: fitback
+          POSTGRES_PASSWORD: fitback
+        ports:
+          - 5432:5432
+        # Sin el healthcheck los pasos arrancan antes de que Postgres acepte
+        # conexiones y la migración falla de forma intermitente.
+        options: >-
+          --health-cmd "pg_isready -U fitback -d fitback"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://fitback:fitback@localhost:5432/fitback?schema=public
+      JWT_SECRET: secreto-solo-para-ci-no-usar-en-ningun-lado
+      APP_TIMEZONE: America/Argentina/Buenos_Aires
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Generar el cliente de Prisma
+        run: npx prisma generate
+
+      - name: Migrar la base
+        run: npx prisma migrate deploy
+
+      # La base de CI arranca vacía y los suites dan por sentadas tres cuentas.
+      # `db:seed` no sirve acá: solo resetea contraseñas de los que ya existen.
+      - name: Sembrar los usuarios que los tests dan por sentados
+        run: npm run db:seed:e2e
+
+      - name: Lint
+        run: npm run lint:check
+
+      - name: Tipos
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      # Los unitarios no tocan la base: van primero porque tardan 5s y cortan
+      # antes de gastar medio minuto en los e2e.
+      - name: Tests unitarios
+        run: npm test
+
+      - name: Tests e2e
+        run: npm run test:e2e
+
+  imagen:
+    name: La imagen de Docker construye
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # No se publica: esto está para enterarse de que el Dockerfile se rompió
+      # en el commit que lo rompió, y no el día del deploy.
+      - name: Construir
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -76,9 +76,14 @@ export class ExercisesService {
   ): Promise<DayExerciseDto> {
     await this.access.assertExercise(user, id, 'write');
 
-    // `targetRir` no es una columna: se traduce al rango min/max.
-    const { targetRir, ...rest } = dto;
+    // Ninguno de los dos es una columna: `targetRir` se traduce al rango
+    // min/max, y `applyToAll` es una instrucción, no un dato.
+    const { targetRir, applyToAll, ...rest } = dto;
     void targetRir;
+
+    if (applyToAll && rest.name !== undefined) {
+      await this.renombrarEnLaRutina(id, rest.name);
+    }
 
     const exercise = await conOrdenUnico(() =>
       this.prisma.dayExercise.update({
@@ -87,6 +92,41 @@ export class ExercisesService {
       }),
     );
     return toDayExerciseDto(exercise);
+  }
+
+  /**
+   * Renombra las demás apariciones del mismo ejercicio en la misma rutina.
+   *
+   * El historial de progreso se agrupa por NOMBRE (`progress.service.ts`), y un
+   * mesociclo repite los mismos ejercicios en cada semana. Corregir un typo en
+   * una sola semana parte la serie histórica en dos entradas —una con los datos
+   * de antes y otra con los de después— sin ningún aviso.
+   *
+   * Es OPT-IN y no automático porque cambiar una sola semana también es un uso
+   * legítimo: en una progresión, la semana 3 puede pasar de sentadilla a
+   * sentadilla frontal a propósito. Propagar siempre rompería eso.
+   *
+   * El alcance es la rutina, no la base entera: es exactamente el alcance con
+   * el que `GET /splits/:id/progress` agrupa.
+   */
+  private async renombrarEnLaRutina(id: string, nombre: string): Promise<void> {
+    const actual = await this.prisma.dayExercise.findUniqueOrThrow({
+      where: { id },
+      select: {
+        name: true,
+        day: { select: { microcycle: { select: { splitId: true } } } },
+      },
+    });
+    if (actual.name === nombre) return;
+
+    await this.prisma.dayExercise.updateMany({
+      where: {
+        name: actual.name,
+        ...VIVO,
+        day: { microcycle: { splitId: actual.day.microcycle.splitId } },
+      },
+      data: { name: nombre },
+    });
   }
 
   /** Reorden en bloque de los ejercicios de un día. Ver `reorder.ts`. */

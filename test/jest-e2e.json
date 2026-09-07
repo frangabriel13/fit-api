@@ -17,5 +17,8 @@
   },
   "transformIgnorePatterns": [
     "/node_modules/(?!(@nestjs)/)"
+  ],
+  "setupFiles": [
+    "<rootDir>/setup-e2e.ts"
   ]
 }
