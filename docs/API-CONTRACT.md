@@ -65,8 +65,39 @@ Todos requieren `Authorization` salvo `POST /auth/login`.
 |---|---|---|---|
 | `POST` | `/auth/login` | `LoginPayload` | `LoginResponse` |
 | `GET` | `/auth/me` | — | `User` |
+| `POST` | `/auth/refresh` | `{ refreshToken }` | `{ accessToken, refreshToken }` |
+| `POST` | `/auth/logout` | `{ refreshToken? }` | — (204) |
+| `POST` | `/auth/logout-all` | — | — (204) |
+| `POST` | `/auth/change-password` | `ChangePasswordPayload` | `{ accessToken, refreshToken }` |
 
 `POST /auth/login` con credenciales inválidas → **401**.
+
+**Sesiones y revocación:**
+
+- `LoginResponse` ahora trae también **`refreshToken`** (aditivo: el front que
+  lo ignore sigue andando igual). El `accessToken` es un JWT stateless y el
+  refresh es una fila en la base — por eso es el único de los dos que se puede
+  revocar de a uno.
+- **`POST /auth/refresh` es público**, porque el access token justamente puede
+  estar vencido: el refresh ES la credencial. **Rota**: el token usado queda
+  revocado y se devuelve otro. Reusar uno ya canjeado cierra TODAS las sesiones
+  del usuario, porque es la señal de que la cadena se filtró. Reintentar con uno
+  revocado por un logout o un cambio de contraseña NO cuenta como reuso: eso es
+  un dispositivo viejo reintentando, y solo da 401.
+- **`POST /auth/logout`** revoca el refresh de ESE dispositivo. Siempre 204,
+  incluso sin body o con un token que no existe: cerrar sesión no puede fallar.
+  El access token sigue vivo hasta vencer — es stateless.
+- **`POST /auth/logout-all`** cierra todas las sesiones, incluida la que llama,
+  y **mata los access tokens al instante**. Es lo que hay que usar si a alguien
+  le robaron el token.
+- ⚠️ **`POST /auth/change-password` cambió: era `204`, ahora es `200` con
+  `{ accessToken, refreshToken }`.** El cambio de contraseña cierra todas las
+  sesiones (antes los tokens ya emitidos sobrevivían, que era el agujero) y
+  devuelve un par nuevo para que el dispositivo que lo hizo no quede afuera.
+  **El front tiene que guardar ese `accessToken`**; si lo ignora, el siguiente
+  request le da 401 y termina en el login.
+- `JWT_EXPIRES_IN` sigue en **7d** porque el front todavía no refresca. Cuando
+  use `/auth/refresh`, bajarlo a `15m`: es el punto de tener refresh.
 
 ### Clientes
 
@@ -101,6 +132,7 @@ busca el día dentro de esa estructura, no hace una llamada aparte.
 | `POST` | `/splits/:splitId/microcycles` | `MicrocyclePayload` | `Microcycle` |
 | `PATCH` | `/microcycles/:id` | `Partial<MicrocyclePayload>` | `Microcycle` |
 | `DELETE` | `/microcycles/:id` | — | — |
+| `PUT` | `/splits/:splitId/microcycles/order` | `{ ids: string[] }` | `Microcycle[]` |
 
 ### Días
 
@@ -109,6 +141,7 @@ busca el día dentro de esa estructura, no hace una llamada aparte.
 | `POST` | `/microcycles/:microcycleId/days` | `DayPayload` | `Day` |
 | `PATCH` | `/days/:id` | `Partial<DayPayload>` | `Day` |
 | `DELETE` | `/days/:id` | — | — |
+| `PUT` | `/microcycles/:microcycleId/days/order` | `{ ids: string[] }` | `Day[]` |
 
 ### Ejercicios del día
 
@@ -117,6 +150,27 @@ busca el día dentro de esa estructura, no hace una llamada aparte.
 | `POST` | `/days/:dayId/exercises` | `DayExercisePayload` | `DayExercise` |
 | `PATCH` | `/exercises/:id` | `Partial<DayExercisePayload>` | `DayExercise` |
 | `DELETE` | `/exercises/:id` | — | — |
+| `PUT` | `/days/:dayId/exercises/order` | `{ ids: string[] }` | `DayExercise[]` |
+
+**Reorden y unicidad de `order`:**
+
+- **`order` es único entre hermanos vivos.** Crear o mover algo a un `order` ya
+  ocupado del mismo padre responde **409**. Lo borrado no ocupa lugar: el
+  `order` de un ejercicio borrado se puede reusar.
+- **Mover algo es UNA llamada, no N.** Los tres `PUT .../order` reciben la lista
+  **completa** de hermanos vivos en el orden deseado y la aplican en una
+  transacción. Devuelven la colección ya ordenada, así que no hace falta
+  refetchear.
+- Es un reemplazo total, no un delta: si faltan hermanos, si viene un id de otro
+  padre o si hay ids repetidos, es **400** y no se mueve nada. Mandar dos veces
+  el mismo orden da el mismo resultado.
+- La renumeración arranca en el **mínimo que ya había**, igual que hace
+  `lib/reorder.ts`: los microciclos quedan en 1, 2, 3… (su `order` ES el número
+  de semana) y los días y ejercicios en 0, 1, 2… Se lleva puestos los huecos y
+  los empates.
+- Esto **reemplaza** a `hooks/use-reorder.ts`, que manda N `PATCH { order }` en
+  paralelo. Con la unicidad activa esos PATCH ahora pueden chocar entre ellos
+  con 409, así que hay que migrar al endpoint nuevo.
 
 ### Sesiones de entrenamiento
 

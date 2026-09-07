@@ -57,7 +57,13 @@ describe('Auth y códigos de error (e2e)', () => {
       const res = await login(TRAINER).expect(200);
       const body = res.body as LoginResponseDto;
 
-      expect(Object.keys(body).sort()).toEqual(['accessToken', 'user']);
+      // `refreshToken` es EXTENSIÓN aditiva: el contrato pide accessToken y
+      // user, y el front ignora lo que no conoce.
+      expect(Object.keys(body).sort()).toEqual([
+        'accessToken',
+        'refreshToken',
+        'user',
+      ]);
       expect(body).not.toHaveProperty('data');
       expect(body.user).toEqual({
         id: expect.any(String) as unknown,

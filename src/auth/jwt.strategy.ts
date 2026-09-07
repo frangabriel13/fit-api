@@ -34,6 +34,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         name: true,
         role: true,
         mustChangePassword: true,
+        tokenVersion: true,
       },
     });
 
@@ -43,6 +44,14 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     // instante en vez de esperar a que venza el token.
     if (!user) throw new UnauthorizedException('Sesión inválida');
 
-    return user;
+    // Emitido antes de un cierre de sesiones: sigue bien firmado y sin vencer,
+    // pero ya no vale. 401 y a login, igual que la baja del usuario.
+    if (payload.ver !== user.tokenVersion) {
+      throw new UnauthorizedException('Sesión cerrada: volvé a entrar');
+    }
+
+    const { tokenVersion, ...safe } = user;
+    void tokenVersion;
+    return safe;
   }
 }

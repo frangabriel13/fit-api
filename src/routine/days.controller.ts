@@ -7,12 +7,14 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
 } from '@nestjs/common';
 
 import type { UserDto } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { DaysService } from './days.service';
 import { CreateDayDto, UpdateDayDto } from './dto/day.dto';
+import { ReorderDto } from './dto/reorder.dto';
 import type { DayDto } from './routine.types';
 
 @Controller()
@@ -26,6 +28,20 @@ export class DaysController {
     @Body() dto: CreateDayDto,
   ): Promise<DayDto> {
     return this.days.create(user, microcycleId, dto);
+  }
+
+  /**
+   * EXTENSIÓN: reorden en bloque. `ids` es la lista completa de hermanos
+   * vivos en el orden deseado, y se aplica en una transacción. Reemplaza a
+   * los N `PATCH { order }` sueltos, que podían quedar a medio aplicar.
+   */
+  @Put('microcycles/:microcycleId/days/order')
+  reorder(
+    @CurrentUser() user: UserDto,
+    @Param('microcycleId', ParseUUIDPipe) microcycleId: string,
+    @Body() dto: ReorderDto,
+  ): Promise<DayDto[]> {
+    return this.days.reorder(user, microcycleId, dto.ids);
   }
 
   @Patch('days/:id')

@@ -6,6 +6,7 @@ import { PassportModule } from '@nestjs/passport';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './jwt.strategy';
+import { RefreshTokensService } from './refresh-tokens.service';
 
 /** `expiresIn` no acepta un string cualquiera: el tipo lo define `ms`. */
 type ExpiresIn = NonNullable<JwtModuleOptions['signOptions']>['expiresIn'];
@@ -26,7 +27,7 @@ type ExpiresIn = NonNullable<JwtModuleOptions['signOptions']>['expiresIn'];
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
+  providers: [AuthService, JwtStrategy, RefreshTokensService],
   exports: [AuthService],
 })
 export class AuthModule {}
