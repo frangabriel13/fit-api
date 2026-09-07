@@ -42,8 +42,9 @@ export class SessionsService {
     userId?: string,
     pagina: PaginationQueryDto = {},
   ): Promise<WorkoutSessionDto[]> {
-    // Historial: se lee aunque el día ya no esté en la rutina.
-    await this.access.assertDay(user, dayId, { incluirBorrados: true });
+    // Historial: quién lo puede ver lo decide `assertCanSeeUser`, igual que en
+    // `GET /sessions/:id`. El día solo tiene que existir.
+    await this.access.assertDayExists(dayId);
     const target = userId ?? user.id;
     if (target !== user.id) await this.access.assertCanSeeUser(user, target);
 
@@ -184,6 +185,7 @@ export class SessionsService {
     dto: UpsertSetLogsDto,
   ): Promise<WorkoutSessionDto> {
     const dayId = await this.access.assertSession(user, sessionId);
+    await this.assertAbierta(sessionId);
     await this.assertExercisesBelongToDay(dayId, dto.setLogs);
 
     // Orden estable de escritura: dos requests simultáneos toman los locks en
@@ -237,7 +239,7 @@ export class SessionsService {
     setLogId: string,
     dto: SetLogPatchDto,
   ): Promise<SetLogDto> {
-    await this.assertSetLog(user, setLogId);
+    await this.assertAbierta(await this.assertSetLog(user, setLogId));
 
     const actualizado = await this.prisma.setLog.update({
       where: { id: setLogId },
@@ -255,18 +257,42 @@ export class SessionsService {
    * queda en la base y reaparece al recargar: el borrado se revierte solo.
    */
   async removeSetLog(user: UserDto, setLogId: string): Promise<void> {
-    await this.assertSetLog(user, setLogId);
+    await this.assertAbierta(await this.assertSetLog(user, setLogId));
     await this.prisma.setLog.delete({ where: { id: setLogId } });
   }
 
-  /** Resuelve una serie y valida el acceso a su sesión. */
-  private async assertSetLog(user: UserDto, setLogId: string): Promise<void> {
+  /** Resuelve una serie, valida el acceso a su sesión y devuelve el id de esta. */
+  private async assertSetLog(user: UserDto, setLogId: string): Promise<string> {
     const log = await this.prisma.setLog.findUnique({
       where: { id: setLogId },
       select: { sessionId: true },
     });
     if (!log) throw new NotFoundException('Serie no encontrada');
     await this.access.assertSession(user, log.sessionId);
+    return log.sessionId;
+  }
+
+  /**
+   * Una sesión cerrada no acepta escrituras sobre sus series.
+   *
+   * `completedAt` es el marcador de "esto ya es una medición hecha" —el front
+   * decide con él qué entra en la progresión—, y si se pudiera seguir
+   * escribiendo después del cierre, lo agregado más tarde quedaría indistinguible
+   * de lo cargado durante el entrenamiento. Corregir sigue siendo posible, pero
+   * como un acto explícito: reabrir con `PATCH /sessions/:id { completed: false }`,
+   * editar y volver a cerrar. Es la misma regla que ya aplicaba
+   * `DELETE /sessions/:id`, que hasta ahora era la única que la hacía cumplir.
+   */
+  private async assertAbierta(sessionId: string): Promise<void> {
+    const { completedAt } = await this.prisma.workoutSession.findUniqueOrThrow({
+      where: { id: sessionId },
+      select: { completedAt: true },
+    });
+    if (completedAt) {
+      throw new ConflictException(
+        'La sesión está cerrada: reabrila para modificar sus series',
+      );
+    }
   }
 
   /**

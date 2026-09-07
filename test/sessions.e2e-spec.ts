@@ -711,7 +711,7 @@ describe('Sesiones y set-logs (e2e)', () => {
       expect(s.completedAt).not.toBeNull();
     });
 
-    it('el cierre sobrevive a un PUT de series posterior', async () => {
+    it('cerrada, un PUT de series -> 409: hay que reabrirla', async () => {
       const { session, ex1: a, ex2: b } = await contextoLimpio();
       await request(http)
         .patch(`/sessions/${session.id}`)
@@ -719,13 +719,34 @@ describe('Sesiones y set-logs (e2e)', () => {
         .send({ completed: true })
         .expect(200);
 
-      const res = await request(http)
+      await request(http)
+        .put(`/sessions/${session.id}/set-logs`)
+        .set(auth(client))
+        .send({ setLogs: grilla(10, a, b) })
+        .expect(409);
+    });
+
+    it('reabrir, editar y volver a cerrar conserva lo editado', async () => {
+      const { session, ex1: a, ex2: b } = await contextoLimpio();
+      const cerrar = (completed: boolean) =>
+        request(http)
+          .patch(`/sessions/${session.id}`)
+          .set(auth(client))
+          .send({ completed })
+          .expect(200);
+
+      await cerrar(true);
+      await cerrar(false);
+      await request(http)
         .put(`/sessions/${session.id}/set-logs`)
         .set(auth(client))
         .send({ setLogs: grilla(10, a, b) })
         .expect(200);
 
-      expect((res.body as WorkoutSessionDto).completedAt).not.toBeNull();
+      const res = await cerrar(true);
+      const s = res.body as WorkoutSessionDto;
+      expect(s.completedAt).not.toBeNull();
+      expect(s.setLogs.length).toBeGreaterThan(0);
     });
 
     it('completed no booleano -> 400', async () => {
@@ -839,6 +860,118 @@ describe('Sesiones y set-logs (e2e)', () => {
         .expect(404);
       await request(http).delete(`/sessions/${session.id}`).expect(401);
     });
+  });
+
+  describe('una sesión cerrada no acepta escrituras sobre sus series', () => {
+    const cerrar = (id: string, token = client) =>
+      request(http)
+        .patch(`/sessions/${id}`)
+        .set(auth(token))
+        .send({ completed: true })
+        .expect(200);
+
+    it('PATCH /set-logs/:id -> 409', async () => {
+      const { session, ex1: a, ex2: b } = await contextoLimpio();
+      const logs = (
+        await request(http)
+          .put(`/sessions/${session.id}/set-logs`)
+          .set(auth(client))
+          .send({ setLogs: grilla(10, a, b) })
+          .expect(200)
+      ).body as WorkoutSessionDto;
+      const setLogId = logs.setLogs[0].id;
+
+      await cerrar(session.id);
+
+      await request(http)
+        .patch(`/set-logs/${setLogId}`)
+        .set(auth(client))
+        .send({ actualReps: 99 })
+        .expect(409);
+    });
+
+    it('DELETE /set-logs/:id -> 409, y reabrir lo vuelve a permitir', async () => {
+      const { session, ex1: a, ex2: b } = await contextoLimpio();
+      const logs = (
+        await request(http)
+          .put(`/sessions/${session.id}/set-logs`)
+          .set(auth(client))
+          .send({ setLogs: grilla(10, a, b) })
+          .expect(200)
+      ).body as WorkoutSessionDto;
+      const setLogId = logs.setLogs[0].id;
+
+      await cerrar(session.id);
+      await request(http)
+        .delete(`/set-logs/${setLogId}`)
+        .set(auth(client))
+        .expect(409);
+
+      await request(http)
+        .patch(`/sessions/${session.id}`)
+        .set(auth(client))
+        .send({ completed: false })
+        .expect(200);
+      await request(http)
+        .delete(`/set-logs/${setLogId}`)
+        .set(auth(client))
+        .expect(204);
+    });
+
+    it('el entrenador tampoco escribe sobre una sesión cerrada', async () => {
+      const { session, ex1: a, ex2: b } = await contextoLimpio();
+      await cerrar(session.id);
+
+      await request(http)
+        .put(`/sessions/${session.id}/set-logs`)
+        .set(auth(trainer))
+        .send({ setLogs: grilla(10, a, b) })
+        .expect(409);
+    });
+  });
+
+  describe('el historial no depende de la asignación vigente', () => {
+    /**
+     * Desasignar conserva la asignación (`isActive: false`) justamente para no
+     * perder el historial. Antes el listado igual respondía 403 y el detalle
+     * 200: la clienta perdía de vista sus propias sesiones según por qué
+     * endpoint entrara.
+     */
+    it('desasignada, la clienta sigue viendo sus sesiones por listado y por id', async () => {
+      const { dayId: dId, session } = await contextoLimpio();
+
+      await request(http)
+        .delete(`/splits/${splitId}/assignments/${clientId}`)
+        .set(auth(trainer))
+        .expect(204);
+
+      try {
+        const listado = (
+          await request(http)
+            .get(`/days/${dId}/sessions`)
+            .set(auth(client))
+            .expect(200)
+        ).body as WorkoutSessionDto[];
+        expect(listado.map((s) => s.id)).toContain(session.id);
+
+        await request(http)
+          .get(`/sessions/${session.id}`)
+          .set(auth(client))
+          .expect(200);
+      } finally {
+        await request(http)
+          .patch(`/splits/${splitId}`)
+          .set(auth(trainer))
+          .send({ clientId })
+          .expect(200);
+      }
+    });
+
+    it('sigue sin dejar ver el historial ajeno: 403', () =>
+      request(http)
+        .get(`/days/${dayId}/sessions?userId=${clientId}`)
+        .set(auth(ajeno))
+        .expect(403));
   });
 
   describe('el 400 del upsert apunta al problema real', () => {

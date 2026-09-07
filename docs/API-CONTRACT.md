@@ -145,6 +145,36 @@ busca el día dentro de esa estructura, no hace una llamada aparte.
   seguidas y ser idempotente.
 - Campos numéricos ausentes (`actualReps`, `actualRir`, `weight`) significan
   "sin dato" → guardar `NULL`, no `0`.
+- **Quién puede leer una sesión es un solo criterio, y los dos GET aplican el
+  mismo:** su dueño, o el entrenador del dueño. Cualquier otro, `403`; sin
+  token, `401`; id inexistente, `404`. `GET /days/:dayId/sessions` sin
+  `userId` devuelve las del que llama —es un *default*, no un recorte de
+  alcance—: el entrenador ve las de su cliente pasando `?userId=`.
+- **El historial no depende de la asignación vigente.** Desasignar a un cliente
+  (`DELETE /splits/:splitId/assignments/:clientId`) desactiva la asignación
+  pero no borra nada, así que sus sesiones viejas se siguen leyendo por los dos
+  GET. Lo mismo vale para un día o una rutina borrados: el soft delete existe
+  para conservar ese historial.
+- **Una sesión cerrada (`completedAt != null`) no acepta escrituras sobre sus
+  series:** `PUT /sessions/:id/set-logs`, `PATCH /set-logs/:id` y
+  `DELETE /set-logs/:id` responden `409`, igual que `DELETE /sessions/:id`.
+  Corregir sigue siendo posible, pero como acto explícito: reabrir con
+  `PATCH /sessions/:id { completed: false }`, editar y volver a cerrar. La
+  razón es que `completedAt` marca "esto ya es una medición hecha" y el front
+  decide con él qué entra en la progresión; si se pudiera escribir después del
+  cierre, lo agregado más tarde quedaría indistinguible de lo cargado durante
+  el entrenamiento.
+- **Ojo con el debounce al cerrar:** como el PUT tiene 800 ms de retraso, un
+  cierre disparado justo después de tipear puede dejar la última escritura en
+  vuelo, que llegaría con la sesión ya cerrada y se perdería con un `409`. El
+  front tiene que vaciar la cola de escrituras pendientes ANTES de mandar el
+  `PATCH` de cierre.
+- **Una rutina puede estar asignada a varios clientes a la vez** (funciona como
+  plantilla). El invariante que el server hace cumplir es el inverso y solo
+  ese: un cliente tiene UNA rutina activa, y asignarle una segunda da `409`.
+  Como el árbol es compartido, editarlo cambia la rutina de todos los clientes
+  asignados a la vez; las sesiones y el progreso, en cambio, son por usuario y
+  nunca se mezclan.
 
 ---
 
