@@ -58,7 +58,7 @@ export class SessionsService {
   }
 
   async findOne(user: UserDto, sessionId: string): Promise<WorkoutSessionDto> {
-    await this.access.assertSession(user, sessionId);
+    await this.access.assertSession(user, sessionId, 'read');
     const session = await this.prisma.workoutSession.findUniqueOrThrow({
       where: { id: sessionId },
       include: SESSION_INCLUDE,
@@ -78,7 +78,7 @@ export class SessionsService {
     sessionId: string,
     dto: UpdateSessionDto,
   ): Promise<WorkoutSessionDto> {
-    await this.access.assertSession(user, sessionId);
+    await this.access.assertSession(user, sessionId, 'write');
     const { completed, ...resto } = dto;
 
     const actual = await this.prisma.workoutSession.findUniqueOrThrow({
@@ -110,7 +110,7 @@ export class SessionsService {
    * el pasado.
    */
   async remove(user: UserDto, sessionId: string): Promise<void> {
-    await this.access.assertSession(user, sessionId);
+    await this.access.assertSession(user, sessionId, 'write');
 
     const { completedAt } = await this.prisma.workoutSession.findUniqueOrThrow({
       where: { id: sessionId },
@@ -184,7 +184,7 @@ export class SessionsService {
     sessionId: string,
     dto: UpsertSetLogsDto,
   ): Promise<WorkoutSessionDto> {
-    const dayId = await this.access.assertSession(user, sessionId);
+    const dayId = await this.access.assertSession(user, sessionId, 'write');
     await this.assertAbierta(sessionId);
     await this.assertExercisesBelongToDay(dayId, dto.setLogs);
 
@@ -268,7 +268,7 @@ export class SessionsService {
       select: { sessionId: true },
     });
     if (!log) throw new NotFoundException('Serie no encontrada');
-    await this.access.assertSession(user, log.sessionId);
+    await this.access.assertSession(user, log.sessionId, 'write');
     return log.sessionId;
   }
 
