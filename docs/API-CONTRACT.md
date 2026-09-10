@@ -8,7 +8,7 @@ de acá. Cada endpoint y forma de respuesta está verificado contra
 Este archivo se mantiene igual en los dos repos (`fitfront/docs/` y
 `fit-api/docs/`). Cuando cambia la API, la copia del backend manda.
 
-**Fuente de verdad de los tipos:** `types/api.ts` del repo del frontend.
+**Fuente de verdad de los tipos:** `types/api.ts` del repositorio del frontend.
 Copiarlo tal cual y derivar de ahí los DTOs de NestJS es lo más seguro.
 
 ---
