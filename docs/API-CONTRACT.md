@@ -1,9 +1,12 @@
 # Contrato de API — FitFront
 
-Este documento describe **la API que el frontend ya espera**. No es una
-propuesta: cada endpoint, path y forma de respuesta está extraído del código
-que ya existe en `hooks/` y `types/api.ts`. Si el backend cumple esto, el
-frontend funciona sin tocar una línea.
+Este documento describe **la API que el frontend consume**. Ya no es una
+propuesta: el frontend está conectado al backend real y todas las pantallas leen
+de acá. Cada endpoint y forma de respuesta está verificado contra
+`http://localhost:3003`.
+
+Este archivo se mantiene igual en los dos repos (`fitfront/docs/` y
+`fit-api/docs/`). Cuando cambia la API, la copia del backend manda.
 
 **Fuente de verdad de los tipos:** `types/api.ts` del repo del frontend.
 Copiarlo tal cual y derivar de ahí los DTOs de NestJS es lo más seguro.
@@ -12,18 +15,14 @@ Copiarlo tal cual y derivar de ahí los DTOs de NestJS es lo más seguro.
 
 ## 0. Cómo se conecta el frontend
 
-Hoy el frontend corre contra una capa de mocks. Para apuntarlo al backend real,
-en `.env.local`:
+En `.env.local`:
 
 ```bash
-NEXT_PUBLIC_API_URL=http://localhost:3000   # base de la API
-NEXT_PUBLIC_USE_MOCKS=false                 # apaga los mocks
+NEXT_PUBLIC_API_URL=http://localhost:3003   # base de la API
 ```
 
-Con `false`, `lib/mocks/` deja de interceptar y todas las llamadas salen a
-`NEXT_PUBLIC_API_URL`. La capa de mocks (`lib/mocks/auth-mock.ts`) es una
-implementación de referencia del contrato: sirve para comparar formas de
-respuesta.
+Es la única variable. Ya no hay capa de mocks: todas las llamadas salen a
+`NEXT_PUBLIC_API_URL` y sin la API levantada la app no funciona.
 
 **CORS:** el frontend corre en `http://localhost:3002`. Habilitar ese origen.
 
@@ -216,6 +215,11 @@ busca el día dentro de esa estructura, no hace una llamada aparte.
   seguidas y ser idempotente.
 - Campos numéricos ausentes (`actualReps`, `actualRir`, `weight`) significan
   "sin dato" → guardar `NULL`, no `0`.
+- **Quién ESCRIBE es más estrecho que quién lee: solo el dueño.** El entrenador
+  lee el historial de su cartera pero no escribe en él —`SetLog` no guarda
+  autor—, así que `PUT /sessions/:id/set-logs`, `PATCH /sessions/:id`,
+  `DELETE /sessions/:id`, `PATCH /set-logs/:id` y `DELETE /set-logs/:id`
+  responden **403** con su token. Ver §4.
 - **Quién puede leer una sesión es un solo criterio, y los dos GET aplican el
   mismo:** su dueño, o el entrenador del dueño. Cualquier otro, `403`; sin
   token, `401`; id inexistente, `404`. `GET /days/:dayId/sessions` sin
@@ -306,40 +310,78 @@ interface SetLogPatch {
 
 ---
 
-## 4. Lo que TODAVÍA no tiene contrato
+## 4. Lo que queda abierto
 
-El frontend tiene **dos realidades** (ver `CLAUDE.md`):
+**Cerrado en la ronda del 7 de septiembre de 2026.** El backend resolvió los
+tres puntos que venían de la ronda anterior:
 
-1. **Cableada a la API** — `/splits/*`: editor de rutinas y modo entrenamiento.
-   Es todo lo de arriba.
-2. **Mock, sin backend** — `/rutina`, `/rutina/entrenar` y `/progreso` leen
-   datos hardcodeados de `lib/routine-data.ts`.
+- **Alcance de las sesiones.** Los dos GET aplican ahora el mismo criterio —el
+  dueño, o el entrenador del dueño—, así que el detalle ya no entrega una sesión
+  ajena por tener su id. De paso, el historial dejó de depender de la asignación
+  vigente: desasignar a un cliente ya no le devuelve 403 sobre sus propias
+  sesiones viejas.
+- **Una sesión cerrada es inmutable.** Los tres endpoints de series responden
+  409 sobre una sesión con `completedAt`, igual que `DELETE /sessions/:id`.
+  Corregir sigue siendo posible reabriendo, que es un acto explícito.
+- **Una rutina puede tener varios clientes**, y ahora está escrito: funciona
+  como plantilla, y el invariante que el server hace cumplir es solo el inverso.
 
-Esa segunda reunión de pantallas es la más nueva y la mejor diseñada, y usa
-conceptos que **el contrato actual no cubre**:
+Lo que sigue abierto:
 
-- **Macrociclo / semanas.** `MACROCYCLE = { week, totalWeeks }` y un historial
-  por ejercicio con una entrada por semana completada. Hoy no hay endpoint.
-- **Superseries.** Ejercicios encadenados que comparten número de planilla
-  (04A + 04B). En el mock es un campo `superset?: string` que agrupa
-  consecutivos. `DayExercise` no lo tiene.
-- **Reps y RIR como rango en texto** (`"10 a 12"`, `"1 a 0"`, `"0 o fallo"`) y
-  descanso como texto (`"4'"`, `"90''"`). El contrato actual usa números
-  (`targetSets`, `targetRir`, `targetRestSeconds`).
+**Cerrado: escribir en nombre de un cliente ya no existe.** El criterio de
+lectura —el dueño, o el entrenador del dueño— había quedado aplicado también a
+las escrituras. Ya no: **el entrenador LEE el historial de su cartera y no
+escribe en él.** Con su token, sobre una sesión de su cliente:
 
-**Decidir esto es parte del trabajo de backend.** Lo razonable es extender
-`DayExercise` (rangos objetivo + `supersetId`) y agregar un endpoint de
-historial por ejercicio, en vez de crear un modelo paralelo. Si cambiás
-`types/api.ts`, avisá: el frontend se adapta.
+```
+GET    /sessions/:id            → 200   leer sigue igual
+GET    /days/:dayId/sessions    → 200   con ?userId= también
+
+PUT    /sessions/:id/set-logs   → 403   "Solo quien entrenó puede modificar esta sesión"
+PATCH  /sessions/:id            → 403   cerrar, reabrir o editar la nota
+DELETE /sessions/:id            → 403
+PATCH  /set-logs/:id            → 403
+DELETE /set-logs/:id            → 403
+```
+
+El motivo: `SetLog` no guarda autor, así que una serie cargada por el entrenador
+es indistinguible de una que cargó quien entrenó, y la progresión la toma como
+medición del cliente. Lo mismo con el cierre —`completedAt` es la marca de
+"esto ya es una medición hecha"— y con la nota del día, que la escribe quien
+entrenó.
+
+El 403 de escritura trae un mensaje propio, distinto del genérico "Sin permiso
+para esta sesión": ahí el problema no es de quién es la sesión, sino que sobre
+las ajenas solo se puede mirar.
+
+Si en algún momento se quiere de verdad, primero hay que decidir quién queda
+como autor y guardarlo en la fila.
+
+**➜ `JWT_EXPIRES_IN` se puede bajar a `15m`.** El interceptor de `lib/api.ts` ya
+canjea el refresh ante un 401 y repite el request; solo si el canje falla borra
+la sesión. El canje va detrás de `navigator.locks` y, con el lock tomado, mira
+si la cookie ya cambió antes de mandar nada — sin eso, dos pestañas que vencen
+al mismo tiempo canjearían el mismo refresh, y el segundo sería un reuso.
+
+Verificado que el reuso revoca **todos los refresh** del usuario. Los access
+tokens ya emitidos, en cambio, sobreviven hasta vencer: son stateless, y matarlos
+al instante es algo que solo hace `logout-all`. Con `15m` esa diferencia deja de
+importar; con `7d`, no.
 
 ---
 
 ## 5. Sobre seguridad, para no arrastrar el atajo del mock
 
-Hoy `proxy.ts` (el middleware de Next) **solo chequea que la cookie exista**, no
-que el token sea válido. Es un atajo del período sin backend. Con la API real,
-la validación tiene que estar del lado del backend en cada request — el
-frontend ya está preparado: cualquier 401 limpia la sesión.
+`proxy.ts` (el middleware de Next) **solo chequea que la cookie exista**, y así
+tiene que quedarse: es un redirect barato para no pintar el shell de la app a
+quien no inició sesión, no una autenticación. La validación real la hace el
+backend en cada request, y el interceptor de `lib/api.ts` limpia la sesión ante
+cualquier 401.
 
-Las credenciales mock de `lib/mocks/auth-mock.ts` son de desarrollo y **no
-deben migrar** a ninguna seed de producción.
+Nada en la app trata la cookie como prueba de identidad: el usuario y su rol
+salen siempre de `GET /auth/me`. Los dos tokens viven en cookies no httpOnly
+—`fitfront_token` y `fitfront_refresh`, ver `lib/auth.ts`— y se borran juntos:
+dejar vivo el refresh después de un logout sería peor que no tenerlo.
+
+Las credenciales de desarrollo viven en la seed del backend y **no deben migrar**
+a producción.

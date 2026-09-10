@@ -774,14 +774,14 @@ describe('Sesiones y set-logs (e2e)', () => {
         .expect(404);
     });
 
-    it('el entrenador puede cerrar la sesión de su cliente', async () => {
+    it('el entrenador NO puede cerrarle el día a su cliente -> 403', async () => {
       const { session } = await contextoLimpio();
 
       await request(http)
         .patch(`/sessions/${session.id}`)
         .set(auth(trainer))
         .send({ completed: true })
-        .expect(200);
+        .expect(403);
     });
   });
 
@@ -918,7 +918,7 @@ describe('Sesiones y set-logs (e2e)', () => {
         .expect(204);
     });
 
-    it('el entrenador tampoco escribe sobre una sesión cerrada', async () => {
+    it('al entrenador lo frena antes el 403: no escribe ni abierta ni cerrada', async () => {
       const { session, ex1: a, ex2: b } = await contextoLimpio();
       await cerrar(session.id);
 
@@ -926,7 +926,116 @@ describe('Sesiones y set-logs (e2e)', () => {
         .put(`/sessions/${session.id}/set-logs`)
         .set(auth(trainer))
         .send({ setLogs: grilla(10, a, b) })
-        .expect(409);
+        .expect(403);
+    });
+  });
+
+  describe('el entrenador LEE el historial de su cliente, pero no escribe en él', () => {
+    const cerrarComoDueño = (id: string) =>
+      request(http)
+        .patch(`/sessions/${id}`)
+        .set(auth(client))
+        .send({ completed: true })
+        .expect(200);
+
+    /**
+     * El criterio de lectura —el dueño, o el entrenador del dueño— no vale para
+     * escribir: `SetLog` no guarda autor, así que una serie cargada por el
+     * entrenador es indistinguible de una que cargó quien entrenó, y el gráfico
+     * de progresión la toma como medición del cliente.
+     */
+    it('leer sí: el detalle y el listado le siguen contestando 200', async () => {
+      const { dayId: d, session } = await contextoLimpio();
+
+      await request(http)
+        .get(`/sessions/${session.id}`)
+        .set(auth(trainer))
+        .expect(200);
+      await request(http)
+        .get(`/days/${d}/sessions?userId=${clientId}`)
+        .set(auth(trainer))
+        .expect(200);
+    });
+
+    it('PUT /sessions/:id/set-logs -> 403', async () => {
+      const { session, ex1: a, ex2: b } = await contextoLimpio();
+
+      await request(http)
+        .put(`/sessions/${session.id}/set-logs`)
+        .set(auth(trainer))
+        .send({ setLogs: grilla(10, a, b) })
+        .expect(403);
+    });
+
+    it('PATCH /sessions/:id con notes -> 403: la nota la escribe quien entrenó', async () => {
+      const { session } = await contextoLimpio();
+
+      await request(http)
+        .patch(`/sessions/${session.id}`)
+        .set(auth(trainer))
+        .send({ notes: 'escrita por el entrenador' })
+        .expect(403);
+    });
+
+    it('PATCH /sessions/:id reabriendo -> 403', async () => {
+      const { session } = await contextoLimpio();
+      await cerrarComoDueño(session.id);
+
+      await request(http)
+        .patch(`/sessions/${session.id}`)
+        .set(auth(trainer))
+        .send({ completed: false })
+        .expect(403);
+    });
+
+    it('DELETE /sessions/:id -> 403', async () => {
+      const { session } = await contextoLimpio();
+
+      await request(http)
+        .delete(`/sessions/${session.id}`)
+        .set(auth(trainer))
+        .expect(403);
+    });
+
+    it('PATCH y DELETE de una serie suelta -> 403', async () => {
+      const { session, ex1: a, ex2: b } = await contextoLimpio();
+      const logs = (
+        await request(http)
+          .put(`/sessions/${session.id}/set-logs`)
+          .set(auth(client))
+          .send({ setLogs: grilla(10, a, b) })
+          .expect(200)
+      ).body as WorkoutSessionDto;
+      const setLogId = logs.setLogs[0].id;
+
+      await request(http)
+        .patch(`/set-logs/${setLogId}`)
+        .set(auth(trainer))
+        .send({ actualReps: 99 })
+        .expect(403);
+      await request(http)
+        .delete(`/set-logs/${setLogId}`)
+        .set(auth(trainer))
+        .expect(403);
+    });
+
+    it('el dueño sigue pudiendo todo sobre su propia sesión', async () => {
+      const { session, ex1: a, ex2: b } = await contextoLimpio();
+
+      await request(http)
+        .put(`/sessions/${session.id}/set-logs`)
+        .set(auth(client))
+        .send({ setLogs: grilla(10, a, b) })
+        .expect(200);
+      await request(http)
+        .patch(`/sessions/${session.id}`)
+        .set(auth(client))
+        .send({ notes: 'pesada la última' })
+        .expect(200);
+      await request(http)
+        .delete(`/sessions/${session.id}`)
+        .set(auth(client))
+        .expect(204);
     });
   });
 

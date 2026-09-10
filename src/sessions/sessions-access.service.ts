@@ -7,24 +7,41 @@ import { UserRole } from '@prisma/client';
 
 import { UserDto } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import type { AccessLevel } from '../routine/routine-access.service';
 
 /**
  * Quién puede ver o tocar las sesiones de entrenamiento.
  *
  *   - el dueño de la sesión           -> lectura y escritura
- *   - el entrenador del dueño         -> lectura y escritura (acordado: el
- *                                        entrenador puede todo sobre su cartera)
+ *   - el entrenador del dueño         -> SOLO lectura
  *   - cualquier otro                  -> 403
  *
  * A diferencia del árbol de rutinas, acá el cliente SÍ escribe: registrar las
  * series de su propio entrenamiento es exactamente lo que hace.
+ *
+ * Y el entrenador NO. Antes podía todo sobre su cartera, y eso dejaba escribir
+ * en nombre de un cliente: `SetLog` no guarda autor, así que una serie cargada
+ * por el entrenador es indistinguible de una que cargó quien entrenó, y la
+ * progresión la toma como medición del cliente. Lo mismo con cerrarle el día
+ * —`completedAt` es la marca de "esto ya es una medición hecha"— y con la nota,
+ * que la escribe quien entrenó. Si alguna vez se quiere de verdad, primero hay
+ * que decidir quién queda como autor y guardarlo.
  */
 @Injectable()
 export class SessionsAccessService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Valida acceso a una sesión y devuelve su `dayId`. */
-  async assertSession(user: UserDto, sessionId: string): Promise<string> {
+  /**
+   * Valida acceso a una sesión y devuelve su `dayId`.
+   *
+   * `need` es obligatorio a propósito: obliga a cada endpoint a declarar si
+   * lee o escribe, que es justo la distinción que antes no existía.
+   */
+  async assertSession(
+    user: UserDto,
+    sessionId: string,
+    need: AccessLevel,
+  ): Promise<string> {
     const session = await this.prisma.workoutSession.findUnique({
       where: { id: sessionId },
       select: {
@@ -37,8 +54,16 @@ export class SessionsAccessService {
     if (!session) throw new NotFoundException('Sesión no encontrada');
     if (session.userId === user.id) return session.dayId;
 
-    if (user.role === UserRole.trainer && session.user.trainerId === user.id) {
-      return session.dayId;
+    const suEntrenador =
+      user.role === UserRole.trainer && session.user.trainerId === user.id;
+
+    if (suEntrenador) {
+      if (need === 'read') return session.dayId;
+      // Mensaje distinto del genérico: acá el problema no es de quién es la
+      // sesión, sino que sobre las ajenas solo se puede mirar.
+      throw new ForbiddenException(
+        'Solo quien entrenó puede modificar esta sesión',
+      );
     }
 
     throw new ForbiddenException('Sin permiso para esta sesión');
